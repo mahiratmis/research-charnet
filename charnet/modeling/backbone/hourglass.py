@@ -73,9 +73,11 @@ class HourGlassBlock(nn.Module):
         self.low_3 = _make_layer_revr(channels[1], channels[0], blocks[0])
 
     def forward(self, x):
+        print(x.shape)
         upsample = lambda input: F.interpolate(input, scale_factor=2, mode='bilinear', align_corners=True)
         up_1 = self.up_1(x)
         low = self.low_3(self.low_2(self.low_1(self.pool(x))))
+        print("Shape", upsample(low).shape)
         return upsample(low) + up_1
 
 
@@ -96,7 +98,9 @@ class HourGlassNet(nn.Module):
         self.hourglass_blocks = nn.Sequential(*hourglass_blocks)
 
     def forward(self, x):
-        return self.hourglass_blocks(self.pre(x))
+        y = self.pre(x)
+        z = self.hourglass_blocks(y)
+        return z 
 
 
 def hourglass88():

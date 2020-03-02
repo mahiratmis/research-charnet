@@ -23,6 +23,7 @@ python setup.py build develop
 
     ```
     python tools/test_net.py configs/icdar2015_hourglass88.yaml <images_dir> <results_dir>
+    python tools/test_net.py configs/icdar2015_hourglass88.yaml datasets/test datasets/test
     ```
 
 

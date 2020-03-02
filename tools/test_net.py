@@ -14,6 +14,7 @@ from charnet.config import cfg
 import matplotlib.pyplot as plt
 
 
+
 def save_word_recognition(word_instances, image_id, save_root, separator=chr(31)):
     with open('{}/{}.txt'.format(save_root, image_id), 'wt') as fw:
         for word_ins in word_instances:
@@ -49,12 +50,17 @@ def vis(img, word_instances):
     return img_word_ins
 
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Test")
 
-    parser.add_argument("config_file", help="path to config file", type=str)
-    parser.add_argument("image_dir", type=str)
-    parser.add_argument("results_dir", type=str)
+    parser.add_argument("-cfg", "--config_file", type=str, default="configs/icdar2015_hourglass88.yaml", help="path to config file")
+    parser.add_argument("-imdir", "--image_dir", type=str, default="datasets/test")
+    parser.add_argument("-resdir", "--results_dir", type=str, default="datasets/test/res")
 
     args = parser.parse_args()
 
@@ -64,9 +70,17 @@ if __name__ == '__main__':
     print(cfg)
 
     charnet = CharNet()
+    print(count_parameters(charnet))
+    # print(charnet)
     charnet.load_state_dict(torch.load(cfg.WEIGHT))
     charnet.eval()
     charnet.cuda()
+    a = torch.FloatTensor([0.5, 0.7])
+    print(a.element_size())
+    print(a.nelement())
+
+    mean = torch.as_tensor([3,5,7])
+    
 
     for im_name in sorted(os.listdir(args.image_dir)):
         print("Processing {}...".format(im_name))
@@ -79,3 +93,5 @@ if __name__ == '__main__':
                 word_instances, os.path.splitext(im_name)[0],
                 args.results_dir, cfg.RESULTS_SEPARATOR
             )
+            img_words = vis(im_original, word_instances)
+            cv2.imwrite(args.results_dir+"/res_"+im_name, img_words)

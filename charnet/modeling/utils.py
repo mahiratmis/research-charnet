@@ -18,3 +18,10 @@ def rotate_rect(x1, y1, x2, y2, degree, center_x, center_y):
         new_y = center_y + dx * math.sin(degree) + dy * math.cos(degree)
         new_points.append([(new_x), (new_y)])
     return new_points
+
+def draw_bboxes(img, bboxes, color=(0, 0, 255), thickness=1):
+    for bbox in bboxes:
+        # if [x1, y1, x2, y2]
+        cv2.rectangle(img, tuple(bbox[:2]), tuple(bbox[-2:]), color, thickness)
+        # if [x1, y1, width, height]
+        cv2.rectangle(img, tuple(bbox[:2]), tuple(bbox[:2]+bbox[-2:]), color, thickness)
