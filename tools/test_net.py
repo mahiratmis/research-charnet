@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 
 
 def save_word_recognition(word_instances, image_id, save_root, separator=chr(31)):
-    with open('{}/{}.txt'.format(save_root, image_id), 'wt') as fw:
+    with open('{}/gt_{}.txt'.format(save_root, image_id), 'wt') as fw:
         for word_ins in word_instances:
             if len(word_ins.text) > 0:
                 fw.write(separator.join([str(_) for _ in word_ins.word_bbox.astype(np.int32).flat]))
