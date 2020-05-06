@@ -30,17 +30,22 @@ _C.NUM_CHAR_CLASSES = 68
 _C.WORD_DETECTOR_DILATION = 1
 _C.RESULTS_SEPARATOR = chr(31)
 
-_C.trainroot = '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental/e2e/train'
-_C.testroot = '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental/e2e/test'
-_C.output_dir = '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental/e2e/output'
+_C.trainroot_icdar = '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental/e2e/train'
+_C.testroot_icdar = '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental/e2e/test'
+_C.output_dir_icdar = '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental/e2e/output'
 _C.data_shape = 640
+_C.trainroot_synth= '/media/end_z820_1/Yeni Birim/DATASETS/SynthText/SynthText.zip'
+_C.testroot_synth= '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental/e2e/test'
+_C.output_dir_synth= '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental/e2e/output'
+
+_C.validation_split = 0.2
 
 # train config
 _C.gpu_id = '0'
 _C.workers = 8
 _C.start_epoch = 0
 _C.epochs = 600
-_C.train_batch_size = 4
+_C.train_batch_size = 2
 _C.lr = 1e-4
 _C.end_lr = 1e-7
 _C.lr_gamma = 0.1

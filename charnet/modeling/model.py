@@ -81,6 +81,8 @@ class CharDetector(nn.Module):
         )
         self.char_fg_pred = nn.Conv2d(bottleneck_channels, 2, kernel_size=1)
         self.char_tblr_pred = nn.Conv2d(bottleneck_channels, 4, kernel_size=1)
+        # manually added mahir
+        self.orient_pred = nn.Conv2d(bottleneck_channels, 1, kernel_size=1)
 
     def forward(self, x):
         feat = self.character_det_conv_final(x)
@@ -88,6 +90,8 @@ class CharDetector(nn.Module):
         pred_char_fg = self.char_fg_pred(self.char_fg_feat(feat))
         char_regression_feat = self.char_regression_feat(feat)
         pred_char_tblr = F.relu(self.char_tblr_pred(char_regression_feat)) * 10.
+        
+        pred_char_orient = self.orient_pred(char_regression_feat)
         pred_char_orient = None
 
         return pred_char_fg, pred_char_tblr, pred_char_orient
