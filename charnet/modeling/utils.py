@@ -45,6 +45,16 @@ def show_img(imgs: np.ndarray, titles, color=False):
         fig.suptitle(title)
         plt.imshow(img, cmap=None if color else 'gray')
 
+def to_img(x, mean=0, std=1, c=1, h=28,w=28):
+    '''resize image to B,C,H,W after unnormalization. 
+    Input : 
+        x: of size B, _
+    '''
+    x = (std * x) + mean   # unnormalize
+    x = x.clamp(0, 1)   # assign less than 0 to 0, bigger than 1 to 1
+    x = x.view(x.size(0), c, h, w) # B, C, H, W format for MNIST
+    return x
+
 
 def draw_bbox(img_path, result, color=(255, 0, 0),thickness=2):
     if isinstance(img_path, str):

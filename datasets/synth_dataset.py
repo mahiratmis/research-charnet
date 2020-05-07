@@ -19,16 +19,36 @@ except:
 
 import torch
 from torch.utils.data import DataLoader, Dataset
+import torchvision
 import torchvision.datasets as datasets
+import torchvision.transforms as transforms
+from torch.utils import data
+from torchvision.utils import save_image
+
 import scipy.io
 
 from shapely.geometry import Polygon
 import math
-import torchvision.transforms as transforms
-from torch.utils import data
+
 
 from charnet.config import cfg
 
+
+def get_featuremap_scales(h, w, ratio=0.25):
+    '''
+    Input: 
+        h     : original image height
+        w     : original image width
+        ratio : featuremap / resized image (not original image)
+    Output:        
+        (scale_h, scale_w,image_resize_height,image_resize_width)
+    '''
+    scale = max(h, w) / float(cfg.INPUT_SIZE)
+    image_resize_height = int(round(h / scale / cfg.SIZE_DIVISIBILITY) * cfg.SIZE_DIVISIBILITY)
+    image_resize_width = int(round(w / scale / cfg.SIZE_DIVISIBILITY) * cfg.SIZE_DIVISIBILITY)
+    scale_h = (image_resize_height * ratio ) / h
+    scale_w = (image_resize_width * ratio )  / w 
+    return (scale_h, scale_w,image_resize_height,image_resize_width)
 
 def cal_distance(x1, y1, x2, y2):
     '''calculate the Euclidean distance'''
@@ -250,7 +270,7 @@ def crop_img(img, vertices, labels, length):
     return region, new_vertices
 
 
-def rotate_all_pixels(rotate_mat, anchor_x, anchor_y, resized_height, resized_width):
+def rotate_all_pixels(rotate_mat, anchor_x, anchor_y, length):
     '''get rotated locations of all pixels for next stages
     Input:
         rotate_mat: rotatation matrix
@@ -261,8 +281,8 @@ def rotate_all_pixels(rotate_mat, anchor_x, anchor_y, resized_height, resized_wi
         rotated_x : rotated x positions <numpy.ndarray, (length,length)>
         rotated_y : rotated y positions <numpy.ndarray, (length,length)>
     '''
-    x = np.arange(resized_width)
-    y = np.arange(resized_height)
+    x = np.arange(length)
+    y = np.arange(length)
     x, y = np.meshgrid(x, y)
     x_lin = x.reshape((1, x.size))
     y_lin = y.reshape((1, x.size))
@@ -315,24 +335,7 @@ def rotate_img(img, vertices, angle_range=10):
     return img, new_vertices
 
 
-def get_featuremap_scales(h, w, ratio=0.25):
-    '''
-    Input: 
-        h     : original image height
-        w     : original image width
-        ratio : featuremap / resized image (not original image)
-    Output:        
-        (scale_h, scale_w,image_resize_height,image_resize_width)
-    '''
-    scale = max(h, w) / float(cfg.INPUT_SIZE)
-    image_resize_height = int(round(h / scale / cfg.SIZE_DIVISIBILITY) * cfg.SIZE_DIVISIBILITY)
-    image_resize_width = int(round(w / scale / cfg.SIZE_DIVISIBILITY) * cfg.SIZE_DIVISIBILITY)
-    scale_h = (image_resize_height * ratio ) / h
-    scale_w = (image_resize_width * ratio )  / w 
-    return (scale_h, scale_w,image_resize_height,image_resize_width)
-
-
-def get_score_geo(img, vertices, labels, scale_h, scale_w, resized_height, resized_width, ratio=0.25):
+def get_score_geo(img, vertices, labels, scale, length):
     '''generate score gt and geometry gt
     Input:
         img     : PIL Image
@@ -343,17 +346,15 @@ def get_score_geo(img, vertices, labels, scale_h, scale_w, resized_height, resiz
     Output:
         score gt, geo gt, ignored
     '''
-    score_map   = np.zeros((int(img.height * scale_h), int(img.width * scale_w), 1), np.float32)
-    geo_map     = np.zeros((int(img.height * scale_h), int(img.width * scale_w), 5), np.float32)
-    ignored_map = np.zeros((int(img.height * scale_h), int(img.width * scale_w), 1), np.float32)
+    score_map   = np.zeros((int(img.height * scale), int(img.width * scale), 1), np.float32)
+    geo_map     = np.zeros((int(img.height * scale), int(img.width * scale), 5), np.float32)
+    ignored_map = np.zeros((int(img.height * scale), int(img.width * scale), 1), np.float32)
     
-    index_x = np.arange(0, resized_width, int(1/ratio))
-    index_y = np.arange(0, resized_height, int(1/ratio))
-    index_x, index_y = np.meshgrid(index_x, index_y)
+    index = np.arange(0, length, int(1/scale))
+    index_x, index_y = np.meshgrid(index, index)
     ignored_polys = []
     polys = []
     
-    scale = np.array([scale_w, scale_h])
     for i, vertice in enumerate(vertices):
         if labels[i] == 0:
             ignored_polys.append(np.around(scale * vertice.reshape((4,2))).astype(np.int32))
@@ -369,7 +370,7 @@ def get_score_geo(img, vertices, labels, scale_h, scale_w, resized_height, resiz
         
         rotated_vertices = rotate_vertices(vertice, theta)
         x_min, x_max, y_min, y_max = get_boundary(rotated_vertices)
-        rotated_x, rotated_y = rotate_all_pixels(rotate_mat, vertice[0], vertice[1], resized_height,resized_width)
+        rotated_x, rotated_y = rotate_all_pixels(rotate_mat, vertice[0], vertice[1], length)
     
         d1 = rotated_y - y_min
         d1[d1<0] = 0
@@ -388,27 +389,6 @@ def get_score_geo(img, vertices, labels, scale_h, scale_w, resized_height, resiz
     cv2.fillPoly(ignored_map, ignored_polys, 1)
     cv2.fillPoly(score_map, polys, 1)
     return torch.Tensor(score_map).permute(2,0,1), torch.Tensor(geo_map).permute(2,0,1), torch.Tensor(ignored_map).permute(2,0,1)
-
-
-def extract_vertices(lines):
-    '''extract vertices info from txt lines
-    Input:
-        lines   : list of string info
-    Output:
-        vertices: vertices of text regions <numpy.ndarray, (n,8)>
-        labels  : 1->valid, 0->ignore, <numpy.ndarray, (n,)>
-        texts   : text within text region
-    '''
-    labels = []
-    vertices = []
-    texts = []
-    for line in lines:
-        params = line.rstrip('\n').lstrip('\ufeff').split(',')
-        vertices.append(list(map(int,params[:8])))
-        texts.append(params[8])
-        label = 0 if '###' in line else 1
-        labels.append(label)
-    return np.array(vertices), np.array(labels), texts
 
 
 def preprocess_words(word_ar):
@@ -567,29 +547,29 @@ if __name__ == '__main__':
     time1 = time.time()
     dataset = SynthTextDataset(args.synthtext)
     print('| Time taken for data init %.2f' % (time.time() - time1))
-    im, wboxes, cboxes, txts = dataset[0]
+    im, wboxes, cboxes, txts = dataset[0]  # im is PIL ımage
     img = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)  # PIL to cv2
     img_words, img_chars = vis(img, wboxes, cboxes, txts)
     cv2.imwrite("res_1.jpg", img_words)
     cv2.imwrite("res_2.jpg", img_chars)
-    show_img(img, ["Org Image"], color=True)
-    show_img(img_words, ["Words on Image"], color=True)
-    show_img(img_chars, ["Chars on Image"], color=True)
-
-    params = get_featuremap_scales(im.height, im.width)
-    scale_h, scale_w,image_resize_height,image_resize_width = params
-    img = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)  # PIL to cv2
-    img = cv2.resize(img, (image_resize_width//4, image_resize_height//4), interpolation=cv2.INTER_LINEAR)
-    score, geo, _ = get_score_geo(im, wboxes, [1 for _ in range(wboxes.shape[0])],*params)
     cv2.imwrite("org.jpg", img)
+
+    img_newsize = 512
+    labels_readable = [1 for _ in range(wboxes.shape[0])]
+    img_new, wboxes = adjust_height(im, wboxes) 
+    img_new, wboxes = rotate_img(img_new, wboxes)
+    img_new, wboxes = crop_img(img_new, wboxes, labels_readable, img_newsize)  
+
+
+    score, geo, _ = get_score_geo(img_new, wboxes, labels_readable, scale=0.25, length=img_newsize)
+    img_new =  cv2.cvtColor(np.array(img_new), cv2.COLOR_RGB2BGR)  # PIL to cv2   
+    img_new = cv2.resize(img_new, (128, 128), interpolation=cv2.INTER_LINEAR)
     score = score.to(torch.float).numpy().transpose(1, 2, 0)  # from C H W to  H W C
-    cv2.imwrite("scored_times_img.jpg", img*score)
+    cv2.imwrite("scored_times_img.jpg", img_new*score)
     cv2.imwrite("score.jpg", score*255)
-    show_img(img, ["Org Image"], color=True)
-    show_img(img * score, ["Scored Image"], color=True)
-    show_img(score*255,["Scores"]) # all text regions
-
-
+    reshape_geo = geo.unsqueeze(dim=0).permute(1,0,2,3) # / 255.
+    #reshape_geo = gt_geo[0].unsqueeze(dim=0).permute(1,0,2,3) / 255.
+    torchvision.utils.save_image(reshape_geo,"geo_grid.jpg", normalize=True)
 
 
     train_size = int(cfg.validation_split * len(dataset))
