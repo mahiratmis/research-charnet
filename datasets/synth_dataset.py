@@ -50,6 +50,7 @@ def get_featuremap_scales(h, w, ratio=0.25):
     scale_w = (image_resize_width * ratio )  / w 
     return (scale_h, scale_w,image_resize_height,image_resize_width)
 
+
 def cal_distance(x1, y1, x2, y2):
     '''calculate the Euclidean distance'''
     return math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
@@ -171,7 +172,7 @@ def cal_error(vertices):
 
 
 def find_min_rect_angle(vertices):
-    '''find the best angle to rotate poly and obtain min rectangle
+    '''find the best angle to rotate poly and obtain min rectangle.
     Input:
         vertices: vertices of text region <numpy.ndarray, (8,)>
     Output:
@@ -224,7 +225,7 @@ def is_cross_text(start_loc, length, vertices):
     return False
         
 
-def crop_img(img, vertices, labels, length):
+def crop_img(img, vertices, labels, length, char_vertices=None):
     '''crop img patches to obtain batch and augment
     Input:
         img         : PIL Image
@@ -232,8 +233,9 @@ def crop_img(img, vertices, labels, length):
         labels      : 1->valid, 0->ignore, <numpy.ndarray, (n,)>
         length      : length of cropped image region
     Output:
-        region      : cropped image region
-        new_vertices: new vertices in cropped region
+        region            : cropped image region
+        new_vertices      : new vertices in cropped region
+        new_char_vertices : new char vertices in cropped region
     '''
     h, w = img.height, img.width
     # confirm the shortest side of image >= length
@@ -250,6 +252,13 @@ def crop_img(img, vertices, labels, length):
         new_vertices[:,[0,2,4,6]] = vertices[:,[0,2,4,6]] * ratio_w
         new_vertices[:,[1,3,5,7]] = vertices[:,[1,3,5,7]] * ratio_h
 
+    new_char_vertices = None
+    if char_vertices is not None:
+        new_char_vertices = np.zeros(char_vertices.shape)
+        if char_vertices.size > 0:
+            new_char_vertices[:,[0,2,4,6]] = char_vertices[:,[0,2,4,6]] * ratio_w
+            new_char_vertices[:,[1,3,5,7]] = char_vertices[:,[1,3,5,7]] * ratio_h
+
     # find random position
     remain_h = img.height - length
     remain_w = img.width - length
@@ -263,11 +272,48 @@ def crop_img(img, vertices, labels, length):
     box = (start_w, start_h, start_w + length, start_h + length)
     region = img.crop(box)
     if new_vertices.size == 0:
-        return region, new_vertices	
+        return region, new_vertices, new_char_vertices	
     
     new_vertices[:,[0,2,4,6]] -= start_w
     new_vertices[:,[1,3,5,7]] -= start_h
-    return region, new_vertices
+    if new_char_vertices is not None:
+        new_char_vertices[:,[0,2,4,6]] -= start_w
+        new_char_vertices[:,[1,3,5,7]] -= start_h
+    return region, new_vertices, new_char_vertices
+
+
+def resize_img(img, vertices, width, height, char_vertices=None):
+    '''resize image and corresponding bounding boxes
+    Input:
+        img         : PIL Image
+        vertices    : vertices of text regions <numpy.ndarray, (n,8)>
+        width       : new width of image 
+        height      : new height of image
+    Output:
+        img               : resized image
+        new_vertices      : new vertices in resized image
+        new_char_vertices : new char vertices in resized image
+    '''
+    h, w = img.height, img.width
+    img = img.resize((width, height), Image.BILINEAR)
+
+    ratio_w = width / w
+    ratio_h = height / h
+
+    new_vertices = np.zeros(vertices.shape)
+    if vertices.size > 0:
+        new_vertices[:,[0,2,4,6]] = vertices[:,[0,2,4,6]] * ratio_w
+        new_vertices[:,[1,3,5,7]] = vertices[:,[1,3,5,7]] * ratio_h
+
+    new_char_vertices = None
+    if char_vertices is not None:
+        new_char_vertices = np.zeros(char_vertices.shape)
+        if char_vertices.size > 0:
+            new_char_vertices[:,[0,2,4,6]] = char_vertices[:,[0,2,4,6]] * ratio_w
+            new_char_vertices[:,[1,3,5,7]] = char_vertices[:,[1,3,5,7]] * ratio_h
+    
+    return img, new_vertices, new_char_vertices
+
 
 
 def rotate_all_pixels(rotate_mat, anchor_x, anchor_y, length):
@@ -294,15 +340,17 @@ def rotate_all_pixels(rotate_mat, anchor_x, anchor_y, length):
     return rotated_x, rotated_y
 
 
-def adjust_height(img, vertices, ratio=0.2):
+def adjust_height(img, vertices, ratio=0.2, char_vertices=None):
     '''adjust height of image to aug data
     Input:
-        img         : PIL Image
-        vertices    : vertices of text regions <numpy.ndarray, (n,8)>
-        ratio       : height changes in [0.8, 1.2]
+        img           : PIL Image
+        vertices      : vertices of text regions <numpy.ndarray, (n,8)>
+        ratio         : height changes in [0.8, 1.2]
+        char_vertices : vertices of char regions <numpy.ndarray, (m,8)>
     Output:
-        img         : adjusted PIL Image
-        new_vertices: adjusted vertices
+        img               : adjusted PIL Image
+        new_vertices      : adjusted vertices
+        new_char_vertices : adjusted char vertices
     '''
     ratio_h = 1 + ratio * (np.random.rand() * 2 - 1)
     old_h = img.height
@@ -312,18 +360,26 @@ def adjust_height(img, vertices, ratio=0.2):
     new_vertices = vertices.copy()
     if vertices.size > 0:
         new_vertices[:,[1,3,5,7]] = vertices[:,[1,3,5,7]] * (new_h / old_h)
-    return img, new_vertices
+
+    new_char_vertices = None
+    if char_vertices is not None:
+        new_char_vertices = char_vertices.copy()
+        if char_vertices.size > 0:
+            new_char_vertices[:,[1,3,5,7]] = char_vertices[:,[1,3,5,7]] * (new_h / old_h)
+    return img, new_vertices, new_char_vertices
 
 
-def rotate_img(img, vertices, angle_range=10):
+def rotate_img(img, vertices, angle_range=10, char_vertices=None):
     '''rotate image [-10, 10] degree to aug data
     Input:
-        img         : PIL Image
-        vertices    : vertices of text regions <numpy.ndarray, (n,8)>
-        angle_range : rotate range
+        img           : PIL Image
+        vertices      : vertices of text regions <numpy.ndarray, (n,8)>
+        angle_range   : rotate range
+        char_vertices : vertices of char regions <numpy.ndarray, (m,8)>
     Output:
-        img         : rotated PIL Image
-        new_vertices: rotated vertices
+        img               : rotated PIL Image
+        new_vertices      : rotated vertices
+        new_char_vertices : rotated char vertices
     '''
     center_x = (img.width - 1) / 2
     center_y = (img.height - 1) / 2
@@ -332,10 +388,17 @@ def rotate_img(img, vertices, angle_range=10):
     new_vertices = np.zeros(vertices.shape)
     for i, vertice in enumerate(vertices):
         new_vertices[i,:] = rotate_vertices(vertice, -angle / 180 * math.pi, np.array([[center_x],[center_y]]))
-    return img, new_vertices
+    
+    new_char_vertices = None
+    if char_vertices is not None:
+        new_char_vertices = np.zeros(char_vertices.shape)
+        for i, vertice in enumerate(char_vertices):
+            new_char_vertices[i,:] = rotate_vertices(vertice, -angle / 180 * math.pi, np.array([[center_x],[center_y]]))  
+
+    return img, new_vertices, new_char_vertices
 
 
-def get_score_geo(img, vertices, labels, scale, length):
+def get_score_geo(img, vertices, labels, scale, length, char_vertices=None, word_lens=None):
     '''generate score gt and geometry gt
     Input:
         img     : PIL Image
@@ -349,18 +412,26 @@ def get_score_geo(img, vertices, labels, scale, length):
     score_map   = np.zeros((int(img.height * scale), int(img.width * scale), 1), np.float32)
     geo_map     = np.zeros((int(img.height * scale), int(img.width * scale), 5), np.float32)
     ignored_map = np.zeros((int(img.height * scale), int(img.width * scale), 1), np.float32)
+
+    #score_map_char   = np.zeros((int(img.height * scale), int(img.width * scale), 1), np.float32)
+    #geo_map_char     = np.zeros((int(img.height * scale), int(img.width * scale), 5), np.float32)
     
     index = np.arange(0, length, int(1/scale))
     index_x, index_y = np.meshgrid(index, index)
     ignored_polys = []
     polys = []
+    #poly_chars = []
     
+    #start=0
     for i, vertice in enumerate(vertices):
+        #end = word_lens[i]
         if labels[i] == 0:
             ignored_polys.append(np.around(scale * vertice.reshape((4,2))).astype(np.int32))
+            #start = end
             continue		
         
-        poly = np.around(scale * shrink_poly(vertice).reshape((4,2))).astype(np.int32) # scaled & shrinked
+        
+        poly = np.around(scale * shrink_poly(vertice).reshape((4,2))).astype(np.int32) # scaled & shrinked        
         polys.append(poly)
         temp_mask = np.zeros(score_map.shape[:-1], np.float32)
         cv2.fillPoly(temp_mask, [poly], 1)
@@ -385,6 +456,8 @@ def get_score_geo(img, vertices, labels, scale, length):
         geo_map[:,:,2] += d3[index_y, index_x] * temp_mask
         geo_map[:,:,3] += d4[index_y, index_x] * temp_mask
         geo_map[:,:,4] += theta * temp_mask
+
+        #start = end
     
     cv2.fillPoly(ignored_map, ignored_polys, 1)
     cv2.fillPoly(score_map, polys, 1)
@@ -411,6 +484,20 @@ def get_path(path):
         return path.encode()
     else:
         return path
+
+
+def my_collate(batch):
+    pil_img       = torch.stack([item[0] for item in batch], dim=0) 
+    score_w       = torch.stack([item[1] for item in batch], dim=0)
+    geo_w         = torch.stack([item[2] for item in batch], dim=0)
+    ignored_w     = torch.stack([item[3] for item in batch], dim=0)
+    score_ch      = torch.stack([item[4] for item in batch], dim=0)
+    geo_ch        = torch.stack([item[5] for item in batch], dim=0) 
+    ignored_ch    = torch.stack([item[6] for item in batch], dim=0) 
+    w_boxes       = [item[7] for item in batch]
+    ch_boxes      = [item[8] for item in batch]
+    word_indices  = [item[9] for item in batch]
+    return [pil_img, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes , word_indices]
 
 
 class SynthTextDataset(Dataset):
@@ -460,8 +547,25 @@ class SynthTextDataset(Dataset):
         self.w_bboxes = gt['wordBB'][0]
         self.ch_bboxes = gt['charBB'][0]
         self.text = gt['txt'][0]
+        self.idx=0
+        self.word_to_idx = {}
+        self.words=[]
         del gt
         print('loading metadata done in {} seconds'.format(time.time() - tm))
+
+    def update_word_to_idx(self, words):
+        for w in set(words):
+            if w not in self.word_to_idx:
+                self.words.append(w)
+                self.word_to_idx[w] = self.idx
+                self.idx += 1
+    
+    def words_to_indices(self, words):
+        return [self.word_to_idx[w] for w in words]
+
+    def get_words(self, indices):
+        return [self.words[idx] for idx in indices]
+
 
     def __len__(self):
         return 858750 # size of SynthText dataset
@@ -472,7 +576,8 @@ class SynthTextDataset(Dataset):
         w_boxes = self.w_bboxes[index]
         ch_boxes = self.ch_bboxes[index]
         words = preprocess_words(self.text[index])
-        chars = "".join(words)
+        self.update_word_to_idx(words)
+        word_lens =[len(w) for w in words]
         im = 'SynthText/' + path
         if len(np.shape(w_boxes)) == 2:
             w_boxes = np.array([w_boxes])
@@ -499,46 +604,148 @@ class SynthTextDataset(Dataset):
             print(e, index, path)
             raise e
 
-        return pil_img, w_boxes.reshape(-1,8), ch_boxes.reshape(-1,8), words
+        img_newsize = 512
+        w_boxes = w_boxes.reshape(-1,8)
+        ch_boxes = ch_boxes.reshape(-1,8)
+        labels_readable = [1 for _ in range(w_boxes.shape[0])]
+        # pil_img, w_boxes, ch_boxes = adjust_height(pil_img, w_boxes, char_vertices=ch_boxes) 
+        pil_img, w_boxes, ch_boxes = rotate_img(pil_img, w_boxes, char_vertices=ch_boxes)
+        pil_img, w_boxes, ch_boxes = crop_img(pil_img, w_boxes, [1 for _ in range(w_boxes.shape[0])], img_newsize, char_vertices=ch_boxes)    
+        #pil_img, w_boxes, ch_boxes = resize_img(pil_img, w_boxes, img_newsize, img_newsize, char_vertices=ch_boxes)
+        score_w, geo_w, ignored_w = get_score_geo(pil_img, w_boxes, [1 for _ in range(w_boxes.shape[0])], scale=0.25, length=img_newsize, char_vertices=ch_boxes, word_lens=word_lens)
+        score_ch, geo_ch, ignored_ch = get_score_geo(pil_img, ch_boxes, [1 for _ in range(ch_boxes.shape[0])], scale=0.25, length=img_newsize, char_vertices=ch_boxes, word_lens=word_lens)
+        transform = transforms.Compose([transforms.ToTensor()])
+        pil_img = transform(pil_img)
+        w_boxes = torch.Tensor(w_boxes)
+        ch_boxes = torch.Tensor(ch_boxes)
+        word_indices = torch.LongTensor(self.words_to_indices(words))
+        return (pil_img, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes , word_indices)
 
 
-def vis(img, word_bbs, char_bbs, txts):
+def vis(img, word_bbs, char_bbs, txts, word_line_color=(0, 0, 255), char_line_color=(0, 255, 0)):
+    '''show word and character bounding boxes on image.
+    Input:
+        img      :  img to draw bboxes and text to <numpy.ndarray, uint8 , (h,w,3)>
+        word_bbs :  word bounding boxes            <numpy.ndarray, (n,8)>
+        char_bbs :  char bounding boxes            <numpy.ndarray, (m,8)>
+        txts     :  word corresponing to each word_bbs <string list of size n>
+    Output:
+        img_word_ins: words transcribed img  <numpy.ndarray, uint8 , (h,w,3)>
+        img_char_ins: chars transcribed img  <numpy.ndarray, uint8 , (h,w,3)>
+    '''
+    colors = [(255,0,0),(0,255,0),(0,0,255),(255,255,0)]
     img_word_ins = img.copy()
-    img_word_ins2 = img.copy()
+    img_char_ins = img.copy()
     for txt,word_bbox in zip(txts, word_bbs):
         word_bbox = word_bbox.astype(np.int32)
-        cv2.polylines(img_word_ins, [word_bbox.reshape(4,2)],
-                      True, (0, 255, 0), 2)
+        # cv2.polylines(img_word_ins, [word_bbox.reshape(4,2)],
+        #               True, word_line_color, 2)
+        word_bbox = word_bbox.reshape(4,2)
+        for i in range(4):
+            cv2.line(img_word_ins, tuple(word_bbox[i]), tuple(word_bbox[(i+1)%4]),colors[i])
         cv2.putText(
             img_word_ins,
             '{}'.format(txt),
-            #(word_bbox[0][0], word_bbox[0][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1
-            (word_bbox[0], word_bbox[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1
+            (word_bbox[0][0], word_bbox[0][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1
+            #(word_bbox[0], word_bbox[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, word_line_color, 1
         )
 
     chars = "".join(txts)
     for ch,ch_bbox in zip(chars, char_bbs):
         ch_bbox = ch_bbox.astype(np.int32)
-        cv2.polylines(img_word_ins2, [ch_bbox.reshape(4,2)],
-                        True, (0, 255, 0), 2)
+        # cv2.polylines(img_char_ins, [ch_bbox.reshape(4,2)],
+        #                 True, char_line_color, 2)
+        ch_bbox = ch_bbox.reshape(4,2)
+        for i in range(4):
+            cv2.line(img_char_ins, tuple(ch_bbox[i]),tuple(ch_bbox[(i+1)%4]),colors[i])
         cv2.putText(
-            img_word_ins2,
+            img_char_ins,
             '{}'.format(ch),
-            #(ch_bbox[0][0], ch_bbox[0][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1
-            (ch_bbox[0], ch_bbox[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1
+            (ch_bbox[0][0], ch_bbox[0][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1
+            #(ch_bbox[0], ch_bbox[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, char_line_color, 1
         )
     
-    return img_word_ins, img_word_ins2
+    return img_word_ins, img_char_ins
+
+
+def order_points(pnts):
+    '''
+    initialzie a list of coordinates that will be ordered
+    such that the first entry in the list is the top-left,
+    the second entry is the top-right, the third is the
+    bottom-right, and the fourth is the bottom-left.
+    Input:
+        pnts: points to be sorted <numpy.ndarray, (8,)>
+    Output:
+        rect: sorted points <numpy.ndarray, (8,)>
+    '''
+    x = pnts[::2]
+    y = pnts[1::2]
+    xmin, xmax = np.min(x), np.max(x)
+    ymin, ymax = np.min(y), np.max(y) 
+    # return the ordered coordinates
+    return np.array([xmin,ymin,xmax,ymin,xmax,ymax,xmin,ymax])
+
+
+## TODO vectorize
+def detect_out_of_region_bboxes(img, word_bbs, char_bbs, txts):
+    '''Checks if any of the points of bbox is inside image
+    Input:
+        img : img to check boundaries              <numpy.ndarray, uint8 , (h,w,3)>
+        word_bbs :  word bounding boxes            <numpy.ndarray, (n,8)>
+        char_bbs :  char bounding boxes            <numpy.ndarray, (m,8)>
+        txts     :  word corresponing to each word_bbs <string list of size n>
+    '''
+    h,w,_ = img.shape
+    p1 = Polygon(np.array([[0,0],[w-1,0],[w-1,h-1],[0,h-1]])).convex_hull
+    words = []
+    word_bboxes = []
+    char_bboxes = []
+    if word_bbs.size is 0:
+        return word_bbs, char_bbs, txts
+
+    start = 0
+    for wbbox, txt in zip(word_bbs,txts):
+        p2 = Polygon(wbbox.reshape((4,2))).convex_hull
+        inter = p1.intersection(p2)
+        end = start + len(txt)            
+        if 0 < inter.area / p2.area :  
+            #wbbox = list(zip(*inter.exterior.coords.xy))  # extract intersection points
+            char_bboxes_of_word = char_bbs[start:end]
+            word = ""
+            for i,cbbox in enumerate(char_bboxes_of_word):
+                p2 = Polygon(cbbox.reshape((4,2))).convex_hull
+                inter = p1.intersection(p2)
+                if 0 < inter.area / p2.area:
+                    char_bboxes.append(cbbox)                    
+                    word += txt[i] # a point is inside image boundaries
+            words.append(word)
+            word_bboxes.append(wbbox)
+        else:
+            oops = True
+        start = end  # start from next word
+    if len(word_bboxes)==0:
+        return np.empty(0),np.empty(0),[]
+    return np.vstack(word_bboxes), np.vstack(char_bboxes), words
+
+
+
+
+
+
 
 if __name__ == '__main__':
     import argparse
     from charnet.modeling.utils import show_img
     from torch.utils.data.sampler import SubsetRandomSampler
+    # reproducability
+    np.random.seed(cfg.seed)
+    torch.manual_seed(cfg.seed)
 
 
     def parse_args():
         parser = argparse.ArgumentParser()
-        parser.add_argument('--synthtext', default='/media/end_z820_1/Yeni Birim/DATASETS/SynthText/a/SynthText.zip', type=str,
+        parser.add_argument('--synthtext', default='/media/end_z820_1/Yeni Birim/DATASETS/SynthText/SynthText.zip', type=str,
                             help='path for synthtext dataset')
         args = parser.parse_args()
         return args
@@ -547,45 +754,69 @@ if __name__ == '__main__':
     time1 = time.time()
     dataset = SynthTextDataset(args.synthtext)
     print('| Time taken for data init %.2f' % (time.time() - time1))
-    im, wboxes, cboxes, txts = dataset[0]  # im is PIL ımage
-    img = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)  # PIL to cv2
-    img_words, img_chars = vis(img, wboxes, cboxes, txts)
-    cv2.imwrite("res_1.jpg", img_words)
-    cv2.imwrite("res_2.jpg", img_chars)
-    cv2.imwrite("org.jpg", img)
+    # im, wboxes, cboxes, txts = dataset[0]  # im is PIL ımage
+    # img = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)  # PIL to cv2
+    # img_words, img_chars = vis(img, wboxes, cboxes, txts)
+    # cv2.imwrite("res_1.jpg", img_words)
+    # cv2.imwrite("res_2.jpg", img_chars)
+    # cv2.imwrite("org.jpg", img)
 
-    img_newsize = 512
-    labels_readable = [1 for _ in range(wboxes.shape[0])]
-    img_new, wboxes = adjust_height(im, wboxes) 
-    img_new, wboxes = rotate_img(img_new, wboxes)
-    img_new, wboxes = crop_img(img_new, wboxes, labels_readable, img_newsize)  
+    # img_newsize = 512
+    # labels_readable = [1 for _ in range(wboxes.shape[0])]
+    # img_new, wboxes = adjust_height(im, wboxes) 
+    # img_new, wboxes = rotate_img(img_new, wboxes)
+    # img_new, wboxes = crop_img(img_new, wboxes, labels_readable, img_newsize)  
 
 
-    score, geo, _ = get_score_geo(img_new, wboxes, labels_readable, scale=0.25, length=img_newsize)
-    img_new =  cv2.cvtColor(np.array(img_new), cv2.COLOR_RGB2BGR)  # PIL to cv2   
-    img_new = cv2.resize(img_new, (128, 128), interpolation=cv2.INTER_LINEAR)
-    score = score.to(torch.float).numpy().transpose(1, 2, 0)  # from C H W to  H W C
-    cv2.imwrite("scored_times_img.jpg", img_new*score)
-    cv2.imwrite("score.jpg", score*255)
-    reshape_geo = geo.unsqueeze(dim=0).permute(1,0,2,3) # / 255.
-    #reshape_geo = gt_geo[0].unsqueeze(dim=0).permute(1,0,2,3) / 255.
-    torchvision.utils.save_image(reshape_geo,"geo_grid.jpg", normalize=True)
+    # score, geo, _ = get_score_geo(img_new, wboxes, labels_readable, scale=0.25, length=img_newsize)
+    # img_new =  cv2.cvtColor(np.array(img_new), cv2.COLOR_RGB2BGR)  # PIL to cv2   
+    # img_new = cv2.resize(img_new, (128, 128), interpolation=cv2.INTER_LINEAR)
+    # score = score.to(torch.float).numpy().transpose(1, 2, 0)  # from C H W to  H W C
+    # cv2.imwrite("scored_times_img.jpg", img_new*score)
+    # cv2.imwrite("score.jpg", score*255)
+    # reshape_geo = geo.unsqueeze(dim=0).permute(1,0,2,3) # / 255.
+    # #reshape_geo = gt_geo[0].unsqueeze(dim=0).permute(1,0,2,3) / 255.
+    # torchvision.utils.save_image(reshape_geo,"geo_grid.jpg", normalize=True)
 
 
     train_size = int(cfg.validation_split * len(dataset))
     test_size = len(dataset) - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=cfg.train_batch_size, shuffle=True)
+    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=cfg.train_batch_size, shuffle=True, collate_fn=my_collate)
 
-    for im, wboxes, cboxes, txts in train_loader:
-        params = get_featuremap_scales(im.height, im.width)
-        scale_h, scale_w,image_resize_height,image_resize_width = params
-        img = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)  # PIL to cv2
-        img = cv2.resize(img, (image_resize_width//4, image_resize_height//4), interpolation=cv2.INTER_LINEAR)
-        score, geo, _ = get_score_geo(img, wboxes, [1 for _ in range(wboxes.shape[0])],*params)
-        show_img(img, ["Org Image"], color=True)
-        show_img(img * score, ["Scored Image"], color=True)
-        show_img(score,["Scores"]) # all text regions
+    for im, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes, words in train_loader:
+        # score_w = score_w.to(torch.float).numpy().transpose(1, 2, 0)  # from C H W to  H W C
+        # score_ch = score_ch.to(torch.float).numpy().transpose(1, 2, 0)  # from C H W to  H W C
+        torchvision.utils.save_image(im,"img_org.jpg")
+        torchvision.utils.save_image(score_w,"score_w.jpg", normalize=True)  
+        for i, geo in enumerate(geo_w):  # 5 channels in eacgeo
+            geo = geo.unsqueeze(dim=0).permute(1,0,2,3)  # B=1 C=5 H W  to C=5 B=1 H W
+            torchvision.utils.save_image(geo,f"geo_w_{i}_grid.jpg", normalize=True) 
+
+        torchvision.utils.save_image(score_ch,"score_ch.jpg", normalize=True)  
+        for i, geo in enumerate(geo_ch):
+            geo = geo.unsqueeze(dim=0).permute(1,0,2,3)
+            torchvision.utils.save_image(geo,f"geo_ch_{i}_grid.jpg", normalize=True)  
+       
+        mult_geo = geo_ch+geo_w
+        for i, geo in enumerate(mult_geo):
+            geo = geo.unsqueeze(dim=0).permute(1,0,2,3)
+            torchvision.utils.save_image(geo,f"mult_geo_{i}_grid.jpg", normalize=True) 
+        torchvision.utils.save_image(score_ch+score_w,"score_ch_w_grid.jpg", normalize=True)
+
+        for img, wboxes, cboxes,wrds in zip(im,w_boxes,ch_boxes,words):
+            wrds = dataset.get_words(wrds.numpy())
+            img_words, img_chars = vis(img.permute(1,2,0).numpy()*255, wboxes.numpy(), cboxes.numpy(), wrds)
+            cv2.imwrite("gt_wrd_bboxes.jpg", img_words) 
+            cv2.imwrite("gt_chr_bboxes.jpg", img_chars)
+
+            wboxes, cboxes,wrds = detect_out_of_region_bboxes(img.permute(1,2,0).numpy()*255, wboxes.numpy(), cboxes.numpy(),wrds)
+            img_words, img_chars = vis(img.permute(1,2,0).numpy()*255, wboxes, cboxes, wrds)
+            cv2.imwrite("gt_wrd_after_bboxes.jpg", img_words) 
+            cv2.imwrite("gt_chr_after_bboxes.jpg", img_chars)
+
+
+
 
     
 

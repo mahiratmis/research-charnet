@@ -22,6 +22,8 @@ from charnet.modeling.model import CharNet
 from charnet.modeling.loss import CharNetLoss
 from charnet.modeling.utils import load_checkpoint, save_checkpoint, setup_logger
 
+from utils.cal_recall import cal_recall_precison_f1
+
 
 def weights_init(m):
     if isinstance(m, nn.Conv2d):
@@ -54,33 +56,53 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
     scheduler.step()
     # lr = adjust_learning_rate(optimizer, epoch)
     lr = scheduler.get_lr()[0]
-    for i, (images, labels, training_mask) in enumerate(train_loader):
+    for i, (images, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, _, _ , _) in enumerate(train_loader):
         cur_batch = images.size()[0]
-        images, labels, training_mask = images.to(device), labels.to(device), training_mask.to(device)
+        images = images.to(device)
+        score_w, geo_w, ignored_w = score_w.to(device), geo_w.to(device), ignored_w.to(device)
+        score_ch, geo_ch, ignored_ch = score_ch.to(device), geo_ch.to(device), ignored_ch.to(device)
         # Forward
         y1 = net(images)
-        loss_c, loss_s, loss = criterion(y1, labels, training_mask)
+        angle_loss_w, iou_loss_w, geo_loss_w, classify_loss_w, angle_loss_ch, iou_loss_ch, geo_loss_ch, classify_loss_ch, loss = criterion(y1, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch)
         # Backward
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         train_loss += loss.item()
 
-        loss_c = loss_c.item()
-        loss_s = loss_s.item()
+        angle_loss_w = angle_loss_w.item()
+        iou_loss_w = iou_loss_w.item()
+        geo_loss_w = geo_loss_w.item()
+        classify_loss_w = classify_loss_w.item()
+        
+        angle_loss_ch = angle_loss_ch.item()
+        iou_loss_ch = iou_loss_ch.item()
+        geo_loss_ch = geo_loss_ch.item()
+        classify_loss_ch = classify_loss_ch.item()
+
         loss = loss.item()
         cur_step = epoch * all_step + i
-        writer.add_scalar(tag='Train/loss_c', scalar_value=loss_c, global_step=cur_step)
-        writer.add_scalar(tag='Train/loss_s', scalar_value=loss_s, global_step=cur_step)
+
+        writer.add_scalar(tag='Train/angle_loss_w', scalar_value=angle_loss_w, global_step=cur_step)
+        writer.add_scalar(tag='Train/iou_loss_w', scalar_value=iou_loss_w, global_step=cur_step)
+        writer.add_scalar(tag='Train/geo_loss_w', scalar_value=geo_loss_w, global_step=cur_step)
+        writer.add_scalar(tag='Train/classify_loss_w', scalar_value=classify_loss_w, global_step=cur_step)
+        writer.add_scalar(tag='Train/angle_loss_ch', scalar_value=angle_loss_ch, global_step=cur_step)
+        writer.add_scalar(tag='Train/iou_loss_ch', scalar_value=iou_loss_ch, global_step=cur_step)
+        writer.add_scalar(tag='Train/geo_loss_ch', scalar_value=geo_loss_ch, global_step=cur_step)
+        writer.add_scalar(tag='Train/classify_loss_ch', scalar_value=classify_loss_ch, global_step=cur_step)
         writer.add_scalar(tag='Train/loss', scalar_value=loss, global_step=cur_step)
         writer.add_scalar(tag='Train/lr', scalar_value=lr, global_step=cur_step)
+
+        batch_loss_cls = classify_loss_w + classify_loss_ch 
+        batch_loss_geo = geo_loss_w + geo_loss_ch
 
         if i % config.display_interval == 0:
             batch_time = time.time() - start
             logger.info(
-                '[{}/{}], [{}/{}], step: {}, {:.3f} samples/sec, batch_loss: {:.4f}, batch_loss_c: {:.4f}, batch_loss_s: {:.4f}, time:{:.4f}, lr:{}'.format(
+                '[{}/{}], [{}/{}], step: {}, {:.3f} samples/sec, batch_loss: {:.4f}, batch_loss_cls: {:.4f}, batch_loss_geo: {:.4f}, time:{:.4f}, lr:{}'.format(
                     epoch, config.epochs, i, all_step, cur_step, config.display_interval * cur_batch / batch_time,
-                    loss, loss_c, loss_s, batch_time, lr))
+                    loss, batch_loss_cls, batch_loss_geo, batch_time, lr))
             start = time.time()
 
         if i % config.show_images_interval == 0:
@@ -97,12 +119,20 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
                 writer.add_image(tag='input/label', img_tensor=show_label, global_step=cur_step)
 
             if config.display_output_images:
-                y1 = torch.sigmoid(y1)
+                y1 = torch.sigmoid(score_w)
                 show_y = y1.detach().cpu()
                 b, c, h, w = show_y.size()
                 show_y = show_y.reshape(b * c, h, w)
                 show_y = vutils.make_grid(show_y.unsqueeze(1), nrow=config.n, normalize=False, padding=20, pad_value=1)
-                writer.add_image(tag='output/preds', img_tensor=show_y, global_step=cur_step)
+                writer.add_image(tag='output/preds_w', img_tensor=show_y, global_step=cur_step)
+
+                y1 = torch.sigmoid(score_ch)
+                show_y = y1.detach().cpu()
+                b, c, h, w = show_y.size()
+                show_y = show_y.reshape(b * c, h, w)
+                show_y = vutils.make_grid(show_y.unsqueeze(1), nrow=config.n, normalize=False, padding=20, pad_value=1)
+                writer.add_image(tag='output/preds_ch', img_tensor=show_y, global_step=cur_step)
+
     writer.add_scalar(tag='Train_epoch/loss', scalar_value=train_loss / all_step, global_step=epoch)
     return train_loss / all_step, lr
 
@@ -145,6 +175,20 @@ def eval(model, save_path, test_path, device):
     return result_dict['recall'], result_dict['precision'], result_dict['hmean']
 
 
+def my_collate(batch):
+    pil_img       = torch.stack([item[0] for item in batch], dim=0) 
+    score_w       = torch.stack([item[1] for item in batch], dim=0)
+    geo_w         = torch.stack([item[2] for item in batch], dim=0)
+    ignored_w     = torch.stack([item[3] for item in batch], dim=0)
+    score_ch      = torch.stack([item[4] for item in batch], dim=0)
+    geo_ch        = torch.stack([item[5] for item in batch], dim=0) 
+    ignored_ch    = torch.stack([item[6] for item in batch], dim=0) 
+    w_boxes       = [item[7] for item in batch]
+    ch_boxes      = [item[8] for item in batch]
+    word_indices  = [item[9] for item in batch]
+    return [pil_img, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes , word_indices]
+
+
 def main():
     if config.output_dir is None:
         config.output_dir = 'output'
@@ -175,8 +219,8 @@ def main():
     train_size = int(config.validation_split * len(dataset))
     test_size = len(dataset) - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=config.train_batch_size, shuffle=True)
-    validation_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=config.train_batch_size,shuffle=True)
+    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=config.train_batch_size, shuffle=True, collate_fn=my_collate)
+    validation_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=config.train_batch_size,shuffle=True, collate_fn=my_collate)
 
 
     config.output_dir = config.output_dir_synth
@@ -192,7 +236,7 @@ def main():
     model = model.to(device)
     # dummy_input = torch.autograd.Variable(torch.Tensor(1, 3, 600, 800).to(device))
     # writer.add_graph(models=models, input_to_model=dummy_input)
-    criterion = CharNetLoss(Lambda=config.Lambda, ratio=config.OHEM_ratio, reduction='mean')
+    criterion = CharNetLoss()
     # optimizer = torch.optim.SGD(models.parameters(), lr=config.lr, momentum=0.99)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
     if config.checkpoint != '' and not config.restart_training:
@@ -205,7 +249,7 @@ def main():
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, config.lr_decay_step, gamma=config.lr_gamma)
 
     all_step = len(train_loader)
-    logger.info('train dataset has {} samples,{} in dataloader'.format(train_data.__len__(), all_step))
+    logger.info('train dataset has {} samples,{} in dataloader'.format(train_size, all_step))
     epoch = 0
     best_model = {'recall': 0, 'precision': 0, 'f1': 0, 'models': ''}
     try:
@@ -222,7 +266,7 @@ def main():
                 recall, precision, f1 = eval(model, os.path.join(config.output_dir, 'output'), validation_loader, device)
                 logger.info('test: recall: {:.6f}, precision: {:.6f}, f1: {:.6f}'.format(recall, precision, f1))
 
-                net_save_path = '{}/PSENet_{}_loss{:.6f}_r{:.6f}_p{:.6f}_f1{:.6f}.pth'.format(config.output_dir, epoch,
+                net_save_path = '{}/CharNet_{}_loss{:.6f}_r{:.6f}_p{:.6f}_f1{:.6f}.pth'.format(config.output_dir, epoch,
                                                                                               train_loss,
                                                                                               recall,
                                                                                               precision,
