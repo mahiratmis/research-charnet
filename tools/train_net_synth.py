@@ -64,7 +64,7 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
         class_map = class_map.to(device)
         # Forward
         y1 = net(images, 1, 1, 512, 512)
-        angle_loss_w, iou_loss_w, geo_loss_w, classify_loss_w, angle_loss_ch, iou_loss_ch, geo_loss_ch, classify_loss_ch, loss, cls_loss = criterion(y1, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, class_map)
+        angle_loss_w, iou_loss_w, geo_loss_w, score_loss_w, angle_loss_ch, iou_loss_ch, geo_loss_ch, score_loss_ch, loss, cls_loss = criterion(y1, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, class_map)
         # Backward
         optimizer.zero_grad()
         loss.backward()
@@ -74,12 +74,12 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
         angle_loss_w = angle_loss_w.item()
         iou_loss_w = iou_loss_w.item()
         geo_loss_w = geo_loss_w.item()
-        classify_loss_w = classify_loss_w.item()
+        score_loss_w = score_loss_w.item()
         
         angle_loss_ch = angle_loss_ch.item()
         iou_loss_ch = iou_loss_ch.item()
         geo_loss_ch = geo_loss_ch.item()
-        classify_loss_ch = classify_loss_ch.item()
+        score_loss_ch = score_loss_ch.item()
         cls_loss = cls_loss.item()
 
         loss = loss.item()
@@ -88,24 +88,25 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
         writer.add_scalar(tag='Train/angle_loss_w', scalar_value=angle_loss_w, global_step=cur_step)
         writer.add_scalar(tag='Train/iou_loss_w', scalar_value=iou_loss_w, global_step=cur_step)
         writer.add_scalar(tag='Train/geo_loss_w', scalar_value=geo_loss_w, global_step=cur_step)
-        writer.add_scalar(tag='Train/classify_loss_w', scalar_value=classify_loss_w, global_step=cur_step)
+        writer.add_scalar(tag='Train/score_loss_w', scalar_value=score_loss_w, global_step=cur_step)
         writer.add_scalar(tag='Train/angle_loss_ch', scalar_value=angle_loss_ch, global_step=cur_step)
         writer.add_scalar(tag='Train/iou_loss_ch', scalar_value=iou_loss_ch, global_step=cur_step)
         writer.add_scalar(tag='Train/geo_loss_ch', scalar_value=geo_loss_ch, global_step=cur_step)
-        writer.add_scalar(tag='Train/classify_loss_ch', scalar_value=classify_loss_ch, global_step=cur_step)
+        writer.add_scalar(tag='Train/score_loss_ch', scalar_value=score_loss_ch, global_step=cur_step)
         writer.add_scalar(tag='Train/classification_loss', scalar_value=cls_loss, global_step=cur_step)        
-        writer.add_scalar(tag='Train/loss', scalar_value=loss, global_step=cur_step)
+        writer.add_scalar(tag='Train/total_loss', scalar_value=loss, global_step=cur_step)
         writer.add_scalar(tag='Train/lr', scalar_value=lr, global_step=cur_step)
 
-        batch_loss_cls = classify_loss_w + classify_loss_ch 
+        batch_loss_score = score_loss_w + score_loss_ch 
         batch_loss_geo = geo_loss_w + geo_loss_ch
+        batch_loss_cls = cls_loss
 
         if i % config.display_interval == 0:
             batch_time = time.time() - start
             logger.info(
-                '[{}/{}], [{}/{}], step: {}, {:.3f} samples/sec, batch_loss: {:.4f}, batch_loss_cls: {:.4f}, batch_loss_geo: {:.4f}, time:{:.4f}, lr:{}'.format(
+                '[{}/{}], [{}/{}], step: {}, {:.3f} samples/sec, batch_loss: {:.4f}, batch_loss_score: {:.4f}, batch_loss_geo: {:.4f}, batch_loss_cls:{:.4f}, time:{:.4f}, lr:{}'.format(
                     epoch, config.epochs, i, all_step, cur_step, config.display_interval * cur_batch / batch_time,
-                    loss, batch_loss_cls, batch_loss_geo, batch_time, lr))
+                    loss, batch_loss_score, batch_loss_geo, batch_loss_cls, batch_time, lr))
             start = time.time()
 
         if i % config.show_images_interval == 0:
@@ -114,12 +115,12 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
                 x = vutils.make_grid(images.detach().cpu(), nrow=4, normalize=True, scale_each=True, padding=20)
                 writer.add_image(tag='input/image', img_tensor=x, global_step=cur_step)
 
-                show_label = labels.detach().cpu()
-                b, c, h, w = show_label.size()
-                show_label = show_label.reshape(b * c, h, w)
-                show_label = vutils.make_grid(show_label.unsqueeze(1), nrow=config.n, normalize=False, padding=20,
-                                              pad_value=1)
-                writer.add_image(tag='input/label', img_tensor=show_label, global_step=cur_step)
+                # show_label = labels.detach().cpu()
+                # b, c, h, w = show_label.size()
+                # show_label = show_label.reshape(b * c, h, w)
+                # show_label = vutils.make_grid(show_label.unsqueeze(1), nrow=config.n, normalize=False, padding=20,
+                #                               pad_value=1)
+                # writer.add_image(tag='input/label', img_tensor=show_label, global_step=cur_step)
 
             if config.display_output_images:
                 y1 = torch.sigmoid(score_w)

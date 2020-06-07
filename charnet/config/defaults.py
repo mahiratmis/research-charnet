@@ -56,8 +56,8 @@ _C.weight_decay = 5e-4
 _C.warm_up_epoch = 6
 _C.warm_up_lr = _C.lr * _C.lr_gamma
 
-_C.display_input_images = False
-_C.display_output_images = False
+_C.display_input_images = True
+_C.display_output_images = True
 _C.display_interval = 10
 _C.show_images_interval = 50
 

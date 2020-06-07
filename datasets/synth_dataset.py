@@ -762,7 +762,9 @@ def detect_out_of_region_bboxes(img_size, word_bbs, char_bbs, txts):
     for wbbox, txt in zip(word_bbs,txts):
         p2 = Polygon(wbbox.reshape((4,2))).convex_hull
         inter = p1.intersection(p2)
-        end = start + len(txt)            
+        end = start + len(txt)
+        if p2.area == 0:
+            continue            
         if 0 < inter.area / p2.area :  
             #wbbox = list(zip(*inter.exterior.coords.xy))  # extract intersection points
             char_bboxes_of_word = char_bbs[start:end]
@@ -770,6 +772,8 @@ def detect_out_of_region_bboxes(img_size, word_bbs, char_bbs, txts):
             for i,cbbox in enumerate(char_bboxes_of_word):
                 p2 = Polygon(cbbox.reshape((4,2))).convex_hull
                 inter = p1.intersection(p2)
+                if p2.area == 0:
+                    continue   
                 if 0.5 < inter.area / p2.area:
                     char_bboxes.append(cbbox)                    
                     word += txt[i] # a point is inside image boundaries

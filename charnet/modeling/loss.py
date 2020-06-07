@@ -30,6 +30,11 @@ class CharNetLoss(nn.Module):
         self.cel = nn.CrossEntropyLoss().cuda()
 
     def forward(self, y_pred, gt_score_w, gt_geo_w, ignored_map_w, gt_score_ch, gt_geo_ch, ignored_map_ch, gt_cls):
+        '''
+            Geo loss = IoU loss* weight + Angle loss
+
+
+        '''
         
         pred_score_w, pred_geo_w, pred_word_orient, pred_score_ch, pred_geo_ch, pred_char_orient, pred_cls = y_pred
         pred_geo_w = torch.cat((pred_geo_w, pred_word_orient), dim=1)    # join B 4 H W and B 1 H W obtain B 5 H W
@@ -44,7 +49,7 @@ class CharNetLoss(nn.Module):
         angle_loss_w = torch.sum(angle_loss_map_w*gt_score_w) / torch.sum(gt_score_w)
         iou_loss_w = torch.sum(iou_loss_map_w*gt_score_w) / torch.sum(gt_score_w)
         geo_loss_w = self.weight_angle * angle_loss_w + iou_loss_w
-        print('Word score loss is {:.8f}, angle loss is {:.8f}, iou loss is {:.8f}'.format(score_loss_w, angle_loss_w, iou_loss_w))
+        # print('Word score loss is {:.8f}, angle loss is {:.8f}, iou loss is {:.8f}'.format(score_loss_w, angle_loss_w, iou_loss_w))
 
         score_loss_ch = get_dice_loss(gt_score_ch, pred_score_ch*(1-ignored_map_ch))
         iou_loss_map_ch, angle_loss_map_ch = get_geo_loss(gt_geo_ch, pred_geo_ch)
@@ -52,7 +57,7 @@ class CharNetLoss(nn.Module):
         angle_loss_ch = torch.sum(angle_loss_map_ch*gt_score_ch) / torch.sum(gt_score_ch)
         iou_loss_ch = torch.sum(iou_loss_map_ch*gt_score_ch) / torch.sum(gt_score_ch)
         geo_loss_ch = self.weight_angle * angle_loss_ch + iou_loss_ch
-        print('Character score loss ch is {:.8f}, angle loss is {:.8f}, iou loss is {:.8f}'.format(score_loss_ch, angle_loss_ch, iou_loss_ch))
+        # print('Character score loss ch is {:.8f}, angle loss is {:.8f}, iou loss is {:.8f}'.format(score_loss_ch, angle_loss_ch, iou_loss_ch))
         # pred cls B 68 H W  gt_cls B 1 H W
         
         batch_size = pred_cls.size(0)
@@ -63,7 +68,7 @@ class CharNetLoss(nn.Module):
         gt_cls = gt_cls.view(batch_size, -1)
 
         cls_loss = self.cel(pred_cls, gt_cls)
-        print('Character sclassification loss is {:.8f}'.format(cls_loss))
+        # print('Character classification loss is {:.8f}'.format(cls_loss))
 
         total_loss = geo_loss_w + score_loss_w + geo_loss_ch + score_loss_ch + cls_loss
         return angle_loss_w, iou_loss_w, geo_loss_w, score_loss_w, angle_loss_ch, iou_loss_ch, geo_loss_ch, score_loss_ch, total_loss, cls_loss
