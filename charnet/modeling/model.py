@@ -92,7 +92,7 @@ class CharDetector(nn.Module):
         pred_char_tblr = F.relu(self.char_tblr_pred(char_regression_feat)) * 10.
         
         pred_char_orient = self.orient_pred(char_regression_feat)
-        pred_char_orient = None
+        # pred_char_orient = None
 
         return pred_char_fg, pred_char_tblr, pred_char_orient
 
@@ -149,8 +149,9 @@ class CharNet(nn.Module):
         self.transform = self.build_transform()
 
     def forward(self, im, im_scale_w, im_scale_h, original_im_w, original_im_h):
-        im = self.transform(im).cuda()
-        im = im.unsqueeze(0)
+        
+        # im = self.transform(im).cuda()
+        # im = im.unsqueeze(0)
         features = self.backbone(im)
 
         pred_word_fg, pred_word_tblr, pred_word_orient = self.word_detector(features)
@@ -161,28 +162,30 @@ class CharNet(nn.Module):
         pred_char_fg = F.softmax(pred_char_fg, dim=1)
         pred_char_cls = F.softmax(recognition_results, dim=1)
 
-        pred_word_fg, pred_word_tblr, \
-        pred_word_orient, pred_char_fg, \
-        pred_char_tblr, pred_char_cls, \
-        pred_char_orient = to_numpy_or_none(
-            pred_word_fg, pred_word_tblr,
-            pred_word_orient, pred_char_fg,
-            pred_char_tblr, pred_char_cls,
-            pred_char_orient
-        )
+        return pred_word_fg, pred_word_tblr, pred_word_orient, pred_char_fg, pred_char_tblr, pred_char_orient,  pred_char_cls
 
-        char_bboxes, char_scores, word_instances = self.post_processing(
-            pred_word_fg[0, 1], pred_word_tblr[0],
-            pred_word_orient[0, 0], pred_char_fg[0, 1],
-            pred_char_tblr[0], pred_char_cls[0],
-            im_scale_w, im_scale_h,
-            original_im_w, original_im_h
-        )
+        # pred_word_fg, pred_word_tblr, \
+        # pred_word_orient, pred_char_fg, \
+        # pred_char_tblr, pred_char_cls, \
+        # pred_char_orient = to_numpy_or_none(
+        #     pred_word_fg, pred_word_tblr,
+        #     pred_word_orient, pred_char_fg,
+        #     pred_char_tblr, pred_char_cls,
+        #     pred_char_orient
+        # )
 
-        return char_bboxes, char_scores, word_instances
+        # char_bboxes, char_scores, word_instances = self.post_processing(
+        #     pred_word_fg[0, 1], pred_word_tblr[0],
+        #     pred_word_orient[0, 0], pred_char_fg[0, 1],
+        #     pred_char_tblr[0], pred_char_cls[0],
+        #     im_scale_w, im_scale_h,
+        #     original_im_w, original_im_h
+        # )
+
+        # return char_bboxes, char_scores, word_instances
 
     def build_transform(self):
-        to_rgb_transform = T.Lambda(lambda x: x[[2, 1, 0]])
+        # to_rgb_transform = T.Lambda(lambda x: x[[2, 1, 0]])
 
         normalize_transform = T.Normalize(
             mean=[0.485, 0.456, 0.406],
@@ -191,9 +194,9 @@ class CharNet(nn.Module):
 
         transform = T.Compose(
             [
-                T.ToPILImage(),
-                T.ToTensor(),
-                to_rgb_transform,
+                # T.ToPILImage(),
+                # T.ToTensor(),
+                # to_rgb_transform,
                 normalize_transform,
             ]
         )

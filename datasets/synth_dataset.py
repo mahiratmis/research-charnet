@@ -29,9 +29,15 @@ import scipy.io
 
 from shapely.geometry import Polygon
 import math
+import matplotlib.pyplot as plt
 
 
+from charnet.modeling.postprocessing import load_char_dicts
 from charnet.config import cfg
+
+import matplotlib.cm as cm 
+rgb_colors = (cm.rainbow(np.linspace(0, 1, 68))[:,:3]*255).astype(int)
+
 
 
 def get_featuremap_scales(h, w, ratio=0.25):
@@ -398,7 +404,7 @@ def rotate_img(img, vertices, angle_range=10, char_vertices=None):
     return img, new_vertices, new_char_vertices
 
 
-def get_score_geo(img, vertices, labels, scale, length, char_vertices=None, word_lens=None):
+def get_score_geo(img, vertices, labels, scale, length, classes=None, word_lens=None):
     '''generate score gt and geometry gt
     Input:
         img     : PIL Image
@@ -412,6 +418,7 @@ def get_score_geo(img, vertices, labels, scale, length, char_vertices=None, word
     score_map   = np.zeros((int(img.height * scale), int(img.width * scale), 1), np.float32)
     geo_map     = np.zeros((int(img.height * scale), int(img.width * scale), 5), np.float32)
     ignored_map = np.zeros((int(img.height * scale), int(img.width * scale), 1), np.float32)
+    class_map   = np.zeros((1, int(img.height * scale), int(img.width * scale)), np.float32)
 
     #score_map_char   = np.zeros((int(img.height * scale), int(img.width * scale), 1), np.float32)
     #geo_map_char     = np.zeros((int(img.height * scale), int(img.width * scale), 5), np.float32)
@@ -423,7 +430,7 @@ def get_score_geo(img, vertices, labels, scale, length, char_vertices=None, word
     #poly_chars = []
     
     #start=0
-    for i, vertice in enumerate(vertices):
+    for i, (vertice, cls) in enumerate(zip(vertices,classes)):
         #end = word_lens[i]
         if labels[i] == 0:
             ignored_polys.append(np.around(scale * vertice.reshape((4,2))).astype(np.int32))
@@ -456,12 +463,18 @@ def get_score_geo(img, vertices, labels, scale, length, char_vertices=None, word
         geo_map[:,:,2] += d3[index_y, index_x] * temp_mask
         geo_map[:,:,3] += d4[index_y, index_x] * temp_mask
         geo_map[:,:,4] += theta * temp_mask
+        class_map += cls * temp_mask
+        class_map[class_map>67] = 0
 
         #start = end
     
     cv2.fillPoly(ignored_map, ignored_polys, 1)
     cv2.fillPoly(score_map, polys, 1)
-    return torch.Tensor(score_map).permute(2,0,1), torch.Tensor(geo_map).permute(2,0,1), torch.Tensor(ignored_map).permute(2,0,1)
+    score_map = torch.Tensor(score_map).permute(2,0,1)
+    geo_map = torch.Tensor(geo_map).permute(2,0,1)
+    ignored_map = torch.Tensor(ignored_map).permute(2,0,1)
+    class_map = torch.LongTensor(class_map)
+    return score_map, geo_map, ignored_map, class_map
 
 
 def preprocess_words(word_ar):
@@ -497,13 +510,24 @@ def my_collate(batch):
     w_boxes       = [item[7] for item in batch]
     ch_boxes      = [item[8] for item in batch]
     word_indices  = [item[9] for item in batch]
-    return [pil_img, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes , word_indices]
+    class_maps    = torch.stack([item[10] for item in batch], dim=0) 
+    paths         = [item[11] for item in batch]
+    return [pil_img, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes , word_indices, class_maps, paths]
 
 
 class SynthTextDataset(Dataset):
-    def __init__(self, zip_path, cache_path=None):
+    def __init__(self, zip_path, cache_path=None, scale=0.25, length=512):
         self.zip_path = zip_path
         self.cache_path = cache_path
+        self.idx=0
+        self.ch_idx=0
+        self.word_to_idx = {}
+        self.char_to_idx = {}
+        self.words=[]
+        self.chars=[]
+        self.scale= scale    # featuremap size / image size
+        self.length = length # image dimensions after crop    
+        self.idx_to_char, self.char_to_idx = load_char_dicts(cfg.CHAR_DICT_FILE)    
 
     def lazy_init(self):
         """
@@ -547,9 +571,6 @@ class SynthTextDataset(Dataset):
         self.w_bboxes = gt['wordBB'][0]
         self.ch_bboxes = gt['charBB'][0]
         self.text = gt['txt'][0]
-        self.idx=0
-        self.word_to_idx = {}
-        self.words=[]
         del gt
         print('loading metadata done in {} seconds'.format(time.time() - tm))
 
@@ -559,24 +580,51 @@ class SynthTextDataset(Dataset):
                 self.words.append(w)
                 self.word_to_idx[w] = self.idx
                 self.idx += 1
-    
+                # for ch in set(w):
+                #     if ch not in self.char_to_idx:
+                #         self.chars.append(ch)
+                #         self.char_to_idx[ch] = self.ch_idx
+                #         self.ch_idx += 1
+
     def words_to_indices(self, words):
         return [self.word_to_idx[w] for w in words]
 
     def get_words(self, indices):
         return [self.words[idx] for idx in indices]
 
+    def words_to_char_indices(self, words):
+        return [[self.char_to_idx[ch.upper()] for ch in w] for w in words]
+
+    def words_to_char_indices_flattened(self, words):
+        return [self.char_to_idx[ch.upper()] for w in words for ch in w]
 
     def __len__(self):
         return 858750 # size of SynthText dataset
 
     def __getitem__(self, index):
+        '''Checks if any of the points of bbox is inside image
+        Input:
+            index    : index of the image to retrieve target information <int>
+        Output:
+            each of the Torch.Tensors is a float tensor
+            pil_img     : image at index <Torch.Tensor (h,w)>
+            score_w     : text non text word probabilities  <Torch.Tensor (h*scale,w*scale)>
+            geo_w       : geometry information of word bboxes <Torch.Tensor (h*scale,w*scale,5)>
+            ignored_w   : unreadable word regions <Torch.Tensor (h*scale,w*scale)>
+            score_ch    : text non text char probabilities  <Torch.Tensor (h*scale,w*scale)>
+            geo_ch      : geometry information of char bboxes <Torch.Tensor (h*scale,w*scale,5)>
+            ignored_ch  : unreadable char regions <Torch.Tensor (h*scale,w*scale)>
+            w_boxes     : bbox coors of words <Torch.Tensor (m,8)>
+            ch_boxes    : bbox coors of chars <Torch.Tensor (n,8)> 
+            word_indices: number correspondings of words <Torch.LongTensor (m,1)>
+            class_map   : class labeled map <Torch.LongTensor (h*scale, w*scale)>
+        '''        
         self.lazy_init()
         path = str(self.images[index][0])
         w_boxes = self.w_bboxes[index]
         ch_boxes = self.ch_bboxes[index]
         words = preprocess_words(self.text[index])
-        self.update_word_to_idx(words)
+        
         word_lens =[len(w) for w in words]
         im = 'SynthText/' + path
         if len(np.shape(w_boxes)) == 2:
@@ -611,15 +659,21 @@ class SynthTextDataset(Dataset):
         # pil_img, w_boxes, ch_boxes = adjust_height(pil_img, w_boxes, char_vertices=ch_boxes) 
         pil_img, w_boxes, ch_boxes = rotate_img(pil_img, w_boxes, char_vertices=ch_boxes)
         pil_img, w_boxes, ch_boxes = crop_img(pil_img, w_boxes, [1 for _ in range(w_boxes.shape[0])], img_newsize, char_vertices=ch_boxes)    
+        w_boxes, ch_boxes, words = detect_out_of_region_bboxes((pil_img.height, pil_img.width), w_boxes, ch_boxes, words)
+        self.update_word_to_idx(words)        
         #pil_img, w_boxes, ch_boxes = resize_img(pil_img, w_boxes, img_newsize, img_newsize, char_vertices=ch_boxes)
-        score_w, geo_w, ignored_w = get_score_geo(pil_img, w_boxes, [1 for _ in range(w_boxes.shape[0])], scale=0.25, length=img_newsize, char_vertices=ch_boxes, word_lens=word_lens)
-        score_ch, geo_ch, ignored_ch = get_score_geo(pil_img, ch_boxes, [1 for _ in range(ch_boxes.shape[0])], scale=0.25, length=img_newsize, char_vertices=ch_boxes, word_lens=word_lens)
-        transform = transforms.Compose([transforms.ToTensor()])
+        
+        w_mask  = [1 for _ in range(w_boxes.shape[0])]    # 1 measn readable text
+        ch_mask = [1 for _ in range(ch_boxes.shape[0])]
+        ch_classes = self.words_to_char_indices_flattened(words)
+        score_w, geo_w, ignored_w, _ = get_score_geo(pil_img, w_boxes, w_mask , scale=0.25, length=img_newsize, classes=w_mask)
+        score_ch, geo_ch, ignored_ch, class_map = get_score_geo(pil_img, ch_boxes, ch_mask , scale=0.25, length=img_newsize, classes=ch_classes)
+        transform = transforms.Compose([transforms.ToTensor()])  # ToTensor normalizes between 0 and 1
         pil_img = transform(pil_img)
         w_boxes = torch.Tensor(w_boxes)
         ch_boxes = torch.Tensor(ch_boxes)
         word_indices = torch.LongTensor(self.words_to_indices(words))
-        return (pil_img, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes , word_indices)
+        return (pil_img, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes , word_indices, class_map, path)
 
 
 def vis(img, word_bbs, char_bbs, txts, word_line_color=(0, 0, 255), char_line_color=(0, 255, 0)):
@@ -688,15 +742,15 @@ def order_points(pnts):
 
 
 ## TODO vectorize
-def detect_out_of_region_bboxes(img, word_bbs, char_bbs, txts):
+def detect_out_of_region_bboxes(img_size, word_bbs, char_bbs, txts):
     '''Checks if any of the points of bbox is inside image
     Input:
-        img : img to check boundaries              <numpy.ndarray, uint8 , (h,w,3)>
+        img_size : height and width of image       <tuple , (h,w)>
         word_bbs :  word bounding boxes            <numpy.ndarray, (n,8)>
         char_bbs :  char bounding boxes            <numpy.ndarray, (m,8)>
         txts     :  word corresponing to each word_bbs <string list of size n>
     '''
-    h,w,_ = img.shape
+    h,w, = img_size
     p1 = Polygon(np.array([[0,0],[w-1,0],[w-1,h-1],[0,h-1]])).convex_hull
     words = []
     word_bboxes = []
@@ -716,15 +770,13 @@ def detect_out_of_region_bboxes(img, word_bbs, char_bbs, txts):
             for i,cbbox in enumerate(char_bboxes_of_word):
                 p2 = Polygon(cbbox.reshape((4,2))).convex_hull
                 inter = p1.intersection(p2)
-                if 0 < inter.area / p2.area:
+                if 0.5 < inter.area / p2.area:
                     char_bboxes.append(cbbox)                    
                     word += txt[i] # a point is inside image boundaries
             words.append(word)
             word_bboxes.append(wbbox)
-        else:
-            oops = True
         start = end  # start from next word
-    if len(word_bboxes)==0:
+    if len(char_bboxes)==0:
         return np.empty(0),np.empty(0),[]
     return np.vstack(word_bboxes), np.vstack(char_bboxes), words
 
@@ -738,6 +790,9 @@ if __name__ == '__main__':
     import argparse
     from charnet.modeling.utils import show_img
     from torch.utils.data.sampler import SubsetRandomSampler
+    import seaborn as sns; sns.set()
+
+
     # reproducability
     np.random.seed(cfg.seed)
     torch.manual_seed(cfg.seed)
@@ -784,36 +839,47 @@ if __name__ == '__main__':
     train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=cfg.train_batch_size, shuffle=True, collate_fn=my_collate)
 
-    for im, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes, words in train_loader:
+    for im, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes, words, class_map, paths in train_loader:
         # score_w = score_w.to(torch.float).numpy().transpose(1, 2, 0)  # from C H W to  H W C
         # score_ch = score_ch.to(torch.float).numpy().transpose(1, 2, 0)  # from C H W to  H W C
-        torchvision.utils.save_image(im,"img_org.jpg")
+        print(paths)
+        # save colored images 
+        torchvision.utils.save_image(im,"img_org_grid.jpg")
         torchvision.utils.save_image(score_w,"score_w.jpg", normalize=True)  
         for i, geo in enumerate(geo_w):  # 5 channels in eacgeo
             geo = geo.unsqueeze(dim=0).permute(1,0,2,3)  # B=1 C=5 H W  to C=5 B=1 H W
             torchvision.utils.save_image(geo,f"geo_w_{i}_grid.jpg", normalize=True) 
-
+        # save text nontext regions and corrresponding bounding boxes
         torchvision.utils.save_image(score_ch,"score_ch.jpg", normalize=True)  
         for i, geo in enumerate(geo_ch):
             geo = geo.unsqueeze(dim=0).permute(1,0,2,3)
             torchvision.utils.save_image(geo,f"geo_ch_{i}_grid.jpg", normalize=True)  
-       
+        # check if char geo intersects with word geo
         mult_geo = geo_ch+geo_w
         for i, geo in enumerate(mult_geo):
             geo = geo.unsqueeze(dim=0).permute(1,0,2,3)
             torchvision.utils.save_image(geo,f"mult_geo_{i}_grid.jpg", normalize=True) 
         torchvision.utils.save_image(score_ch+score_w,"score_ch_w_grid.jpg", normalize=True)
-
-        for img, wboxes, cboxes,wrds in zip(im,w_boxes,ch_boxes,words):
+        m = 0
+        for img, wboxes, cboxes,wrds, cls_map in zip(im,w_boxes,ch_boxes,words, class_map):
             wrds = dataset.get_words(wrds.numpy())
             img_words, img_chars = vis(img.permute(1,2,0).numpy()*255, wboxes.numpy(), cboxes.numpy(), wrds)
             cv2.imwrite("gt_wrd_bboxes.jpg", img_words) 
             cv2.imwrite("gt_chr_bboxes.jpg", img_chars)
 
-            wboxes, cboxes,wrds = detect_out_of_region_bboxes(img.permute(1,2,0).numpy()*255, wboxes.numpy(), cboxes.numpy(),wrds)
-            img_words, img_chars = vis(img.permute(1,2,0).numpy()*255, wboxes, cboxes, wrds)
-            cv2.imwrite("gt_wrd_after_bboxes.jpg", img_words) 
-            cv2.imwrite("gt_chr_after_bboxes.jpg", img_chars)
+
+            img = np.ones((128,128,3))
+            for r in range(128):
+                for c in range(128):
+                    img[r ,c, :] = rgb_colors[cls_map[0, r, c]]
+            m += 1
+            cv2.imwrite("class_colors_"+str(m)+".jpg", img)
+
+            ax = sns.heatmap(cls_map[0].numpy(), annot=True, fmt="d")
+            figure = ax.get_figure()    
+            figure.savefig('class_conf.png', dpi=400)
+            
+
 
 
 

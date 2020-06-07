@@ -57,3 +57,20 @@ print(bbox[:-1])
 
 empty_array = np.empty(0)
 print(empty_array.size)
+
+x = [[1, 2, 3], [4, 5, 6]]
+y = [[ch+1 for ch in w] for w in x]
+print(y)
+
+r1 = torch.zeros((1,1,4))
+r2 = torch.ones((1,1,1))
+r3 = torch.cat((r1,r2), dim=2)
+print(r3)
+
+colors= [(1,2,3),(4,5,6),(7,8,9)]
+import matplotlib.pyplot as plt
+import seaborn as sns; sns.set()
+data= torch.randn((128,128))
+fig, ax = plt.subplots(figsize=(50,50))  
+ax = sns.heatmap(data.numpy(), annot=True, ax=ax) 
+fig.savefig('class_conf.png', dpi=400)

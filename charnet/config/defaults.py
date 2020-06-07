@@ -35,8 +35,10 @@ _C.testroot_icdar = '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental
 _C.output_dir_icdar = '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental/e2e/output'
 _C.data_shape = 640
 _C.trainroot_synth= '/media/end_z820_1/Yeni Birim/DATASETS/SynthText/SynthText.zip'
-_C.testroot_synth= '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental/e2e/test'
-_C.output_dir_synth= '/media/end_z820_1/Yeni Birim/DATASETS/ICDAR_2015/incidental/e2e/output'
+_C.testroot_synth= '/media/end_z820_1/Yeni Birim/DATASETS/a/SynthText/test'
+_C.output_dir_synth= '/media/end_z820_1/Yeni Birim/DATASETS/a/SynthText/output'
+
+_C.output_dir = _C.output_dir_synth
 
 _C.validation_split = 0.2
 

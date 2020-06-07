@@ -36,6 +36,16 @@ def load_char_dict(path, seperator=chr(31)):
     return char_dict
 
 
+def load_char_dicts(path, seperator=chr(31)):
+    idx_to_char, char_to_idx = dict(), dict()
+    with open(path, 'rt') as fr:
+        for line in fr:
+            sp = line.strip('\n').split(seperator)
+            idx_to_char[int(sp[1])] = sp[0].upper()
+            char_to_idx[sp[0].upper()] = int(sp[1])
+    return idx_to_char, char_to_idx
+
+
 class WordInstance:
     def __init__(self, word_bbox, word_bbox_score, text, text_score, char_scores):
         self.word_bbox = word_bbox

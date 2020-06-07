@@ -17,7 +17,7 @@ import torchvision.utils as vutils
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data.sampler import SubsetRandomSampler
 
-from datasets.synth_dataset import SynthTextDataset
+from datasets.synth_dataset import SynthTextDataset, my_collate
 from charnet.modeling.model import CharNet
 from charnet.modeling.loss import CharNetLoss
 from charnet.modeling.utils import load_checkpoint, save_checkpoint, setup_logger
@@ -56,14 +56,15 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
     scheduler.step()
     # lr = adjust_learning_rate(optimizer, epoch)
     lr = scheduler.get_lr()[0]
-    for i, (images, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, _, _ , _) in enumerate(train_loader):
+    for i, (images, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes, words, class_map, paths) in enumerate(train_loader):
         cur_batch = images.size()[0]
         images = images.to(device)
         score_w, geo_w, ignored_w = score_w.to(device), geo_w.to(device), ignored_w.to(device)
         score_ch, geo_ch, ignored_ch = score_ch.to(device), geo_ch.to(device), ignored_ch.to(device)
+        class_map = class_map.to(device)
         # Forward
-        y1 = net(images)
-        angle_loss_w, iou_loss_w, geo_loss_w, classify_loss_w, angle_loss_ch, iou_loss_ch, geo_loss_ch, classify_loss_ch, loss = criterion(y1, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch)
+        y1 = net(images, 1, 1, 512, 512)
+        angle_loss_w, iou_loss_w, geo_loss_w, classify_loss_w, angle_loss_ch, iou_loss_ch, geo_loss_ch, classify_loss_ch, loss, cls_loss = criterion(y1, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, class_map)
         # Backward
         optimizer.zero_grad()
         loss.backward()
@@ -79,6 +80,7 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
         iou_loss_ch = iou_loss_ch.item()
         geo_loss_ch = geo_loss_ch.item()
         classify_loss_ch = classify_loss_ch.item()
+        cls_loss = cls_loss.item()
 
         loss = loss.item()
         cur_step = epoch * all_step + i
@@ -91,6 +93,7 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
         writer.add_scalar(tag='Train/iou_loss_ch', scalar_value=iou_loss_ch, global_step=cur_step)
         writer.add_scalar(tag='Train/geo_loss_ch', scalar_value=geo_loss_ch, global_step=cur_step)
         writer.add_scalar(tag='Train/classify_loss_ch', scalar_value=classify_loss_ch, global_step=cur_step)
+        writer.add_scalar(tag='Train/classification_loss', scalar_value=cls_loss, global_step=cur_step)        
         writer.add_scalar(tag='Train/loss', scalar_value=loss, global_step=cur_step)
         writer.add_scalar(tag='Train/lr', scalar_value=lr, global_step=cur_step)
 
@@ -137,8 +140,10 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
     return train_loss / all_step, lr
 
 
-def eval(model, save_path, test_path, device):
+def eval(model, save_path, val_loader, device, test_path="/media/end_z820_1/Yeni Birim/DATASETS/a/SynthText/SynthText"):
     model.eval()
+
+    # for i, (images, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, _, _ , _, class_map,paths) in enumerate(train_loader):
     # torch.cuda.empty_cache()  # speed up evaluating after training finished
     img_path = os.path.join(test_path, 'img')
     gt_path = os.path.join(test_path, 'gt')
@@ -175,18 +180,42 @@ def eval(model, save_path, test_path, device):
     return result_dict['recall'], result_dict['precision'], result_dict['hmean']
 
 
-def my_collate(batch):
-    pil_img       = torch.stack([item[0] for item in batch], dim=0) 
-    score_w       = torch.stack([item[1] for item in batch], dim=0)
-    geo_w         = torch.stack([item[2] for item in batch], dim=0)
-    ignored_w     = torch.stack([item[3] for item in batch], dim=0)
-    score_ch      = torch.stack([item[4] for item in batch], dim=0)
-    geo_ch        = torch.stack([item[5] for item in batch], dim=0) 
-    ignored_ch    = torch.stack([item[6] for item in batch], dim=0) 
-    w_boxes       = [item[7] for item in batch]
-    ch_boxes      = [item[8] for item in batch]
-    word_indices  = [item[9] for item in batch]
-    return [pil_img, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes , word_indices]
+def eval_org(model, save_path, test_path, device):
+    model.eval()
+    # torch.cuda.empty_cache()  # speed up evaluating after training finished
+    img_path = os.path.join(test_path, 'img')
+    gt_path = os.path.join(test_path, 'gt')
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path, ignore_errors=True)
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    long_size = 2240
+    # 预测所有测试图片
+    img_paths = [os.path.join(img_path, x) for x in os.listdir(img_path)]
+    for img_path in tqdm(img_paths, desc='test models'):
+        img_name = os.path.basename(img_path).split('.')[0]
+        save_name = os.path.join(save_path, 'res_' + img_name + '.txt')
+
+        assert os.path.exists(img_path), 'file is not exists'
+        img = cv2.imread(img_path)
+        h, w = img.shape[:2]
+        #if max(h, w) > long_size:
+        scale = long_size / max(h, w)
+        img = cv2.resize(img, None, fx=scale, fy=scale)
+        # 将图片由(w,h)变为(1,img_channel,h,w)
+        tensor = transforms.ToTensor()(img)
+        tensor = tensor.unsqueeze_(0)
+        tensor = tensor.to(device)
+        with torch.no_grad():
+            preds = model(tensor)
+            preds, boxes_list = pse_decode(preds[0], config.scale)
+            scale = (preds.shape[1] * 1.0 / w, preds.shape[0] * 1.0 / h)
+            if len(boxes_list):
+                boxes_list = boxes_list / scale
+        np.savetxt(save_name, boxes_list.reshape(-1, 8), delimiter=',', fmt='%d')
+    # 开始计算 recall precision f1
+    result_dict = cal_recall_precison_f1(gt_path, save_path)
+    return result_dict['recall'], result_dict['precision'], result_dict['hmean']
 
 
 def main():
@@ -263,7 +292,8 @@ def main():
             #                                                                               train_loss)
             # save_checkpoint(net_save_path, models, optimizer, epoch, logger)
             if (0.3 < train_loss < 0.4 and epoch % 4 == 0) or train_loss < 0.3:
-                recall, precision, f1 = eval(model, os.path.join(config.output_dir, 'output'), validation_loader, device)
+                # recall, precision, f1 = eval(model, os.path.join(config.output_dir, 'output'), validation_loader, device)
+                recall, precision, f1 = (1,2,3)
                 logger.info('test: recall: {:.6f}, precision: {:.6f}, f1: {:.6f}'.format(recall, precision, f1))
 
                 net_save_path = '{}/CharNet_{}_loss{:.6f}_r{:.6f}_p{:.6f}_f1{:.6f}.pth'.format(config.output_dir, epoch,
