@@ -35,7 +35,8 @@ class CharNetLoss(nn.Module):
 
 
         '''
-        
+        # make sure all ignored maps are zeros
+        assert ignored_map_w.sum().item() == 0 and ignored_map_ch.sum().item() == 0 
         pred_score_w, pred_geo_w, pred_word_orient, pred_score_ch, pred_geo_ch, pred_char_orient, pred_cls = y_pred
         pred_geo_w = torch.cat((pred_geo_w, pred_word_orient), dim=1)    # join B 4 H W and B 1 H W obtain B 5 H W
         pred_geo_ch = torch.cat((pred_geo_ch, pred_char_orient), dim=1)

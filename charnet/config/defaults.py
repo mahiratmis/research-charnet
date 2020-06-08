@@ -63,7 +63,7 @@ _C.show_images_interval = 50
 
 _C.pretrained = True
 _C.restart_training = True
-_C.checkpoint = ''
+_C.checkpoint = '/home/end_z820_1/Documents/projects/research-charnet/weights/icdar2015_hourglass88.pth'
 
 # net config
 _C.n = 6

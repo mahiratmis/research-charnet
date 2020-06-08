@@ -57,6 +57,7 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
     # lr = adjust_learning_rate(optimizer, epoch)
     lr = scheduler.get_lr()[0]
     for i, (images, score_w, geo_w, ignored_w, score_ch, geo_ch, ignored_ch, w_boxes, ch_boxes, words, class_map, paths) in enumerate(train_loader):
+        
         cur_batch = images.size()[0]
         images = images.to(device)
         score_w, geo_w, ignored_w = score_w.to(device), geo_w.to(device), ignored_w.to(device)
@@ -123,19 +124,36 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
                 # writer.add_image(tag='input/label', img_tensor=show_label, global_step=cur_step)
 
             if config.display_output_images:
+
+                pred_score_w, _, _, pred_score_ch, _, _, _ = y1
+
+                y1 = torch.sigmoid(pred_score_w)
+                show_y = y1.detach().cpu()
+                b, c, h, w = show_y.size()
+                show_y = show_y.reshape(b * c, h, w)
+                show_y = vutils.make_grid(show_y.unsqueeze(1), nrow=config.n, normalize=False, padding=20, pad_value=1)
+                writer.add_image(tag='output/preds_w_score', img_tensor=show_y, global_step=cur_step)
+
+                y1 = torch.sigmoid(pred_score_ch)
+                show_y = y1.detach().cpu()
+                b, c, h, w = show_y.size()
+                show_y = show_y.reshape(b * c, h, w)
+                show_y = vutils.make_grid(show_y.unsqueeze(1), nrow=config.n, normalize=False, padding=20, pad_value=1)
+                writer.add_image(tag='output/pred_ch_score', img_tensor=show_y, global_step=cur_step)
+
                 y1 = torch.sigmoid(score_w)
                 show_y = y1.detach().cpu()
                 b, c, h, w = show_y.size()
                 show_y = show_y.reshape(b * c, h, w)
                 show_y = vutils.make_grid(show_y.unsqueeze(1), nrow=config.n, normalize=False, padding=20, pad_value=1)
-                writer.add_image(tag='output/preds_w', img_tensor=show_y, global_step=cur_step)
+                writer.add_image(tag='output/gt_w_score', img_tensor=show_y, global_step=cur_step)
 
                 y1 = torch.sigmoid(score_ch)
                 show_y = y1.detach().cpu()
                 b, c, h, w = show_y.size()
                 show_y = show_y.reshape(b * c, h, w)
                 show_y = vutils.make_grid(show_y.unsqueeze(1), nrow=config.n, normalize=False, padding=20, pad_value=1)
-                writer.add_image(tag='output/preds_ch', img_tensor=show_y, global_step=cur_step)
+                writer.add_image(tag='output/gt_ch_score', img_tensor=show_y, global_step=cur_step)
 
     writer.add_scalar(tag='Train_epoch/loss', scalar_value=train_loss / all_step, global_step=epoch)
     return train_loss / all_step, lr
@@ -270,8 +288,9 @@ def main():
     # optimizer = torch.optim.SGD(models.parameters(), lr=config.lr, momentum=0.99)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
     if config.checkpoint != '' and not config.restart_training:
-        start_epoch = load_checkpoint(config.checkpoint, model, logger, device, optimizer)
-        start_epoch += 1
+        # start_epoch = load_checkpoint(config.checkpoint, model, logger, device, optimizer)
+        model.load_state_dict(torch.load(config.checkpoint, map_location=device))
+        start_epoch = 1
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, config.lr_decay_step, gamma=config.lr_gamma,
                                                          last_epoch=start_epoch)
     else:
@@ -289,9 +308,9 @@ def main():
                                          writer, logger)
             logger.info('[{}/{}], train_loss: {:.4f}, time: {:.4f}, lr: {}'.format(
                 epoch, config.epochs, train_loss, time.time() - start, lr))
-            # net_save_path = '{}/PSENet_{}_loss{:.6f}.pth'.format(config.output_dir, epoch,
-            #                                                                               train_loss)
-            # save_checkpoint(net_save_path, models, optimizer, epoch, logger)
+            net_save_path = '{}/CharNet{}_loss{:.6f}_bs{}_lr{}_wd{}.pth'.format(config.output_dir, epoch,
+                                                                                          train_loss, config.train_batch_size, lr,config.lr_decay_step)
+            save_checkpoint(net_save_path, models, optimizer, epoch, logger)
             if (0.3 < train_loss < 0.4 and epoch % 4 == 0) or train_loss < 0.3:
                 # recall, precision, f1 = eval(model, os.path.join(config.output_dir, 'output'), validation_loader, device)
                 recall, precision, f1 = (1,2,3)

@@ -668,7 +668,7 @@ class SynthTextDataset(Dataset):
         ch_classes = self.words_to_char_indices_flattened(words)
         score_w, geo_w, ignored_w, _ = get_score_geo(pil_img, w_boxes, w_mask , scale=0.25, length=img_newsize, classes=w_mask)
         score_ch, geo_ch, ignored_ch, class_map = get_score_geo(pil_img, ch_boxes, ch_mask , scale=0.25, length=img_newsize, classes=ch_classes)
-        transform = transforms.Compose([transforms.ToTensor()])  # ToTensor normalizes between 0 and 1
+        transform = transforms.Compose([transforms.ColorJitter(0.5, 0.5, 0.5, 0.25), transforms.ToTensor(), transforms.Normalize(mean=(0.5,0.5,0.5),std=(0.5,0.5,0.5))])  # ToTensor normalizes between 0 and 1
         pil_img = transform(pil_img)
         w_boxes = torch.Tensor(w_boxes)
         ch_boxes = torch.Tensor(ch_boxes)
