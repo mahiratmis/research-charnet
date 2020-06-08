@@ -342,7 +342,7 @@ def main():
                     else:
                         save_checkpoint(best_save_path, model, optimizer, epoch, logger)
 
-                    pse_path = glob.glob(config.output_dir + '/PSENet_*.pth')
+                    pse_path = glob.glob(config.output_dir + '/CharNet_*.pth')
                     for p_path in pse_path:
                         if os.path.exists(p_path):
                             os.remove(p_path)
