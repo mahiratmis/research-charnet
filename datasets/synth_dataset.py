@@ -470,7 +470,7 @@ def get_score_geo(img, vertices, labels, scale, length, classes=None, word_lens=
     
     cv2.fillPoly(ignored_map, ignored_polys, 1)
     cv2.fillPoly(score_map, polys, 1)
-    score_map = torch.Tensor(score_map).permute(2,0,1)
+    score_map = torch.LongTensor(score_map).permute(2,0,1)
     geo_map = torch.Tensor(geo_map).permute(2,0,1)
     ignored_map = torch.Tensor(ignored_map).permute(2,0,1)
     class_map = torch.LongTensor(class_map)
@@ -668,7 +668,8 @@ class SynthTextDataset(Dataset):
         ch_classes = self.words_to_char_indices_flattened(words)
         score_w, geo_w, ignored_w, _ = get_score_geo(pil_img, w_boxes, w_mask , scale=0.25, length=img_newsize, classes=w_mask)
         score_ch, geo_ch, ignored_ch, class_map = get_score_geo(pil_img, ch_boxes, ch_mask , scale=0.25, length=img_newsize, classes=ch_classes)
-        transform = transforms.Compose([transforms.ColorJitter(0.5, 0.5, 0.5, 0.25), transforms.ToTensor(), transforms.Normalize(mean=(0.5,0.5,0.5),std=(0.5,0.5,0.5))])  # ToTensor normalizes between 0 and 1
+        transform = transforms.Compose([transforms.ColorJitter(0.5, 0.5, 0.5, 0.25), transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225])])  # ToTensor normalizes between 0 and 1
         pil_img = transform(pil_img)
         w_boxes = torch.Tensor(w_boxes)
         ch_boxes = torch.Tensor(ch_boxes)

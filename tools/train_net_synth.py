@@ -141,14 +141,14 @@ def train_epoch(net, optimizer, scheduler, train_loader, device, criterion, epoc
                 show_y = vutils.make_grid(show_y.unsqueeze(1), nrow=config.n, normalize=False, padding=20, pad_value=1)
                 writer.add_image(tag='output/pred_ch_score', img_tensor=show_y, global_step=cur_step)
 
-                y1 = torch.sigmoid(score_w)
+                y1 = score_w
                 show_y = y1.detach().cpu()
                 b, c, h, w = show_y.size()
                 show_y = show_y.reshape(b * c, h, w)
                 show_y = vutils.make_grid(show_y.unsqueeze(1), nrow=config.n, normalize=False, padding=20, pad_value=1)
                 writer.add_image(tag='output/gt_w_score', img_tensor=show_y, global_step=cur_step)
 
-                y1 = torch.sigmoid(score_ch)
+                y1 = score_ch
                 show_y = y1.detach().cpu()
                 b, c, h, w = show_y.size()
                 show_y = show_y.reshape(b * c, h, w)
