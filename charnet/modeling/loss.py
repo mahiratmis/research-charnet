@@ -27,7 +27,13 @@ class CharNetLoss(nn.Module):
     def __init__(self, weight_angle=10):
         super(CharNetLoss, self).__init__()
         self.weight_angle = weight_angle
-        self.cel = nn.CrossEntropyLoss().cuda()
+        # score loss
+        self.cel2 = nn.CrossEntropyLoss(weight=torch.Tensor([0.3,0.7])).cuda()  
+        # self.cel2 = nn.CrossEntropyLoss().cuda()  
+
+        # classification loss
+        self.celn = nn.CrossEntropyLoss().cuda()
+
 
     def forward(self, y_pred, gt_score_w, gt_geo_w, ignored_map_w, gt_score_ch, gt_geo_ch, ignored_map_ch, gt_cls):
         '''
@@ -50,22 +56,22 @@ class CharNetLoss(nn.Module):
         # pred_cls = pred_cls.permute(0,2,3,1)
         # gt_cls = gt_cls.permute(0,2,3,1)
         pred_cls = pred_cls.view(batch_size, num_classes, -1)  # B C H*W
-        gt_cls = gt_cls.view(batch_size, -1) # B H*W
-        cls_loss = self.cel(pred_cls, gt_cls)
+        gt_cls = gt_cls.view(batch_size, -1)  # B H*W
+        cls_loss = self.celn(pred_cls, gt_cls)
         # print('Character classification loss is {:.8f}'.format(cls_loss))
 
         iou_loss_map_w, angle_loss_map_w = get_geo_loss(gt_geo_w, pred_geo_w)
 
-        angle_loss_w = torch.sum(angle_loss_map_w*gt_score_w) / torch.sum(gt_score_w)
-        iou_loss_w = torch.sum(iou_loss_map_w*gt_score_w) / torch.sum(gt_score_w)
+        angle_loss_w = torch.sum(angle_loss_map_w * gt_score_w) / torch.sum(gt_score_w)
+        iou_loss_w = torch.sum(iou_loss_map_w * gt_score_w) / torch.sum(gt_score_w)
         geo_loss_w = self.weight_angle * angle_loss_w + iou_loss_w
         # print('Word score loss is {:.8f}, angle loss is {:.8f}, iou loss is {:.8f}'.format(score_loss_w, angle_loss_w, iou_loss_w))
 
 
         iou_loss_map_ch, angle_loss_map_ch = get_geo_loss(gt_geo_ch, pred_geo_ch)
 
-        angle_loss_ch = torch.sum(angle_loss_map_ch*gt_score_ch) / torch.sum(gt_score_ch)
-        iou_loss_ch = torch.sum(iou_loss_map_ch*gt_score_ch) / torch.sum(gt_score_ch)
+        angle_loss_ch = torch.sum(angle_loss_map_ch * gt_score_ch) / torch.sum(gt_score_ch)
+        iou_loss_ch = torch.sum(iou_loss_map_ch * gt_score_ch) / torch.sum(gt_score_ch)
         geo_loss_ch = self.weight_angle * angle_loss_ch + iou_loss_ch
         # print('Character score loss ch is {:.8f}, angle loss is {:.8f}, iou loss is {:.8f}'.format(score_loss_ch, angle_loss_ch, iou_loss_ch))
 
@@ -75,17 +81,17 @@ class CharNetLoss(nn.Module):
 
         # score_loss_w = get_dice_loss(gt_score_w, pred_score_w*(1-ignored_map_w))
         # gt_score_w B 1 H W pred_score_w B 2 H W
-        pred_score_w = pred_score_w*(1-ignored_map_w)
+        pred_score_w = pred_score_w * (1 - ignored_map_w)
         pred_score_w = pred_score_w.view(batch_size, 2, -1)  # 2 is number of classes which are text non text
         gt_score_w = gt_score_w.view(batch_size, -1)
-        score_loss_w = self.cel(pred_score_w, gt_score_w)
+        score_loss_w = self.cel2(pred_score_w, gt_score_w)
 
 
         # score_loss_ch = get_dice_loss(gt_score_ch, pred_score_ch*(1-ignored_map_ch))
-        pred_score_ch = pred_score_ch*(1-ignored_map_ch)
+        pred_score_ch = pred_score_ch * (1 - ignored_map_ch)
         pred_score_ch = pred_score_ch.view(batch_size,2,-1)
         gt_score_ch = gt_score_ch.view(batch_size,-1)
-        score_loss_ch = self.cel(pred_score_ch, gt_score_ch)
+        score_loss_ch = self.cel2(pred_score_ch, gt_score_ch)
 
         total_loss = geo_loss_w + score_loss_w + geo_loss_ch + score_loss_ch + cls_loss
         return angle_loss_w, iou_loss_w, geo_loss_w, score_loss_w, angle_loss_ch, iou_loss_ch, geo_loss_ch, score_loss_ch, total_loss, cls_loss

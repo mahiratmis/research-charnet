@@ -451,26 +451,29 @@ def get_score_geo(img, vertices, labels, scale, length, classes=None, word_lens=
         rotated_x, rotated_y = rotate_all_pixels(rotate_mat, vertice[0], vertice[1], length)
     
         d1 = rotated_y - y_min
-        d1[d1<0] = 0
+        d1[d1 < 0] = 0
         d2 = y_max - rotated_y
-        d2[d2<0] = 0
+        d2[d2 < 0] = 0
         d3 = rotated_x - x_min
-        d3[d3<0] = 0
+        d3[d3 < 0] = 0
         d4 = x_max - rotated_x
-        d4[d4<0] = 0
+        d4[d4 < 0] = 0
         geo_map[:,:,0] += d1[index_y, index_x] * temp_mask
         geo_map[:,:,1] += d2[index_y, index_x] * temp_mask
         geo_map[:,:,2] += d3[index_y, index_x] * temp_mask
         geo_map[:,:,3] += d4[index_y, index_x] * temp_mask
         geo_map[:,:,4] += theta * temp_mask
         class_map += cls * temp_mask
-        class_map[class_map>67] = 0
+        class_map[class_map > 67] = 0  # set intersections to zero
 
         #start = end
     
     cv2.fillPoly(ignored_map, ignored_polys, 1)
     cv2.fillPoly(score_map, polys, 1)
+    # print("-" * 50)
     score_map = torch.LongTensor(score_map).permute(2,0,1)
+    # for i in range(5):
+    #     print(f"{i} min {geo_map[:,:,i].min()} max {geo_map[:,:,i].max()}")
     geo_map = torch.Tensor(geo_map).permute(2,0,1)
     ignored_map = torch.Tensor(ignored_map).permute(2,0,1)
     class_map = torch.LongTensor(class_map)
@@ -487,7 +490,7 @@ def preprocess_words(word_ar):
         for i in range(start + 1, len(s) + 1):
             if i == len(s) or s[i] == '\n' or s[i] == ' ':
                 if start != i:
-                    words.append(s[start : i])
+                    words.append(s[start:i])
                 start = i + 1
     return words
 
@@ -526,7 +529,7 @@ class SynthTextDataset(Dataset):
         self.words=[]
         self.chars=[]
         self.scale= scale    # featuremap size / image size
-        self.length = length # image dimensions after crop    
+        self.length = length  # image dimensions after crop    
         self.idx_to_char, self.char_to_idx = load_char_dicts(cfg.CHAR_DICT_FILE)    
 
     def lazy_init(self):
@@ -567,10 +570,10 @@ class SynthTextDataset(Dataset):
                     pickle.dump(gt, f, protocol=pickle.HIGHEST_PROTOCOL)
             except IOError:
                 warnings.warn("Couldn't write SynthTextDataset cache at {}".format(cache_path))
-        self.images = gt['imnames'][0]
-        self.w_bboxes = gt['wordBB'][0]
-        self.ch_bboxes = gt['charBB'][0]
-        self.text = gt['txt'][0]
+        self.images = gt['imnames'][0][:5000]
+        self.w_bboxes = gt['wordBB'][0][:5000]
+        self.ch_bboxes = gt['charBB'][0][:5000]
+        self.text = gt['txt'][0][:5000]
         del gt
         print('loading metadata done in {} seconds'.format(time.time() - tm))
 
@@ -599,7 +602,7 @@ class SynthTextDataset(Dataset):
         return [self.char_to_idx[ch.upper()] for w in words for ch in w]
 
     def __len__(self):
-        return 858750 # size of SynthText dataset
+        return 5000   # 858750 size of SynthText dataset
 
     def __getitem__(self, index):
         '''Checks if any of the points of bbox is inside image
@@ -668,7 +671,7 @@ class SynthTextDataset(Dataset):
         ch_classes = self.words_to_char_indices_flattened(words)
         score_w, geo_w, ignored_w, _ = get_score_geo(pil_img, w_boxes, w_mask , scale=0.25, length=img_newsize, classes=w_mask)
         score_ch, geo_ch, ignored_ch, class_map = get_score_geo(pil_img, ch_boxes, ch_mask , scale=0.25, length=img_newsize, classes=ch_classes)
-        transform = transforms.Compose([transforms.ColorJitter(0.5, 0.5, 0.5, 0.25), transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406],
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406],
             std=[0.229, 0.224, 0.225])])  # ToTensor normalizes between 0 and 1
         pil_img = transform(pil_img)
         w_boxes = torch.Tensor(w_boxes)
@@ -850,7 +853,10 @@ if __name__ == '__main__':
         print(paths)
         # save colored images 
         torchvision.utils.save_image(im,"img_org_grid.jpg")
-        torchvision.utils.save_image(score_w,"score_w.jpg", normalize=True)  
+        score_w = score_w.type(torch.FloatTensor)
+        score_ch = score_ch.type(torch.FloatTensor)
+        torchvision.utils.save_image(score_w,"score_w.jpg", normalize=False)  
+        torchvision.utils.save_image(score_ch,"score_ch.jpg", normalize=False) 
         for i, geo in enumerate(geo_w):  # 5 channels in eacgeo
             geo = geo.unsqueeze(dim=0).permute(1,0,2,3)  # B=1 C=5 H W  to C=5 B=1 H W
             torchvision.utils.save_image(geo,f"geo_w_{i}_grid.jpg", normalize=True) 
@@ -864,7 +870,7 @@ if __name__ == '__main__':
         for i, geo in enumerate(mult_geo):
             geo = geo.unsqueeze(dim=0).permute(1,0,2,3)
             torchvision.utils.save_image(geo,f"mult_geo_{i}_grid.jpg", normalize=True) 
-        torchvision.utils.save_image(score_ch+score_w,"score_ch_w_grid.jpg", normalize=True)
+        torchvision.utils.save_image(score_ch + score_w,"score_ch_w_grid.jpg", normalize=True)
         m = 0
         for img, wboxes, cboxes,wrds, cls_map in zip(im,w_boxes,ch_boxes,words, class_map):
             wrds = dataset.get_words(wrds.numpy())
@@ -873,16 +879,16 @@ if __name__ == '__main__':
             cv2.imwrite("gt_chr_bboxes.jpg", img_chars)
 
 
-            img = np.ones((128,128,3))
-            for r in range(128):
-                for c in range(128):
-                    img[r ,c, :] = rgb_colors[cls_map[0, r, c]]
-            m += 1
-            cv2.imwrite("class_colors_"+str(m)+".jpg", img)
+            # img = np.ones((128,128,3))
+            # for r in range(128):
+            #     for c in range(128):
+            #         img[r ,c, :] = rgb_colors[cls_map[0, r, c]]
+            # m += 1
+            # cv2.imwrite("class_colors_"+str(m)+".jpg", img)
 
-            ax = sns.heatmap(cls_map[0].numpy(), annot=True, fmt="d")
-            figure = ax.get_figure()    
-            figure.savefig('class_conf.png', dpi=400)
+            # ax = sns.heatmap(cls_map[0].numpy(), annot=True, fmt="d")
+            # figure = ax.get_figure()    
+            # figure.savefig('class_conf.png', dpi=400)
             
 
 

@@ -97,10 +97,11 @@ def setup_logger(log_file_path: str = None):
     return logger
 
 
-def save_checkpoint(checkpoint_path, model, optimizer, epoch, logger):
+def save_checkpoint(checkpoint_path, model, optimizer, epoch, loss, logger):
     state = {'state_dict': model.state_dict(),
              'optimizer': optimizer.state_dict(),
-             'epoch': epoch}
+             'epoch': epoch,
+             'loss':loss}
     torch.save(state, checkpoint_path)
     logger.info('models saved to %s' % checkpoint_path)
 
@@ -111,8 +112,9 @@ def load_checkpoint(checkpoint_path, model, logger, device, optimizer=None):
     if optimizer is not None:
         optimizer.load_state_dict(state['optimizer'])
     start_epoch = state['epoch']
+    lowest_loss = state['loss']
     logger.info('models loaded from %s' % checkpoint_path)
-    return start_epoch
+    return start_epoch, lowest_loss
 
 
 # --exeTime

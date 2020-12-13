@@ -4,7 +4,7 @@
 # Contact: github@malong.com
 #
 # This source code is licensed under the LICENSE file in the root directory of this source tree.
-
+import math
 import torch
 from torch import nn
 from charnet.modeling.backbone.resnet import resnet50
@@ -61,8 +61,9 @@ class WordDetector(nn.Module):
         pred_word_fg = self.word_fg_pred(self.word_fg_feat(feat))
 
         word_regression_feat = self.word_regression_feat(feat)
-        pred_word_tblr = F.relu(self.word_tblr_pred(word_regression_feat)) * 10.
-        pred_word_orient = self.orient_pred(word_regression_feat)
+        # pred_word_tblr = F.relu(self.word_tblr_pred(word_regression_feat))
+        pred_word_tblr = torch.sigmoid(self.word_tblr_pred(word_regression_feat)) * 512
+        pred_word_orient = (torch.sigmoid(self.orient_pred(word_regression_feat)) - 0.5) * math.pi
 
         return pred_word_fg, pred_word_tblr, pred_word_orient
 
@@ -89,9 +90,10 @@ class CharDetector(nn.Module):
 
         pred_char_fg = self.char_fg_pred(self.char_fg_feat(feat))
         char_regression_feat = self.char_regression_feat(feat)
-        pred_char_tblr = F.relu(self.char_tblr_pred(char_regression_feat)) * 10.
+        # pred_char_tblr = F.relu(self.char_tblr_pred(char_regression_feat))
+        pred_char_tblr = torch.sigmoid(self.char_tblr_pred(char_regression_feat))* 512
         
-        pred_char_orient = self.orient_pred(char_regression_feat)
+        pred_char_orient = (torch.sigmoid(self.orient_pred(char_regression_feat)) - 0.5) * math.pi  # [-pi/2, pi/2] range
         # pred_char_orient = None
 
         return pred_char_fg, pred_char_tblr, pred_char_orient
@@ -162,7 +164,7 @@ class CharNet(nn.Module):
         pred_char_fg = F.softmax(pred_char_fg, dim=1)
         pred_char_cls = F.softmax(recognition_results, dim=1)
 
-        return pred_word_fg, pred_word_tblr, pred_word_orient, pred_char_fg, pred_char_tblr, pred_char_orient,  pred_char_cls
+        return pred_word_fg, pred_word_tblr, pred_word_orient, pred_char_fg, pred_char_tblr, pred_char_orient, pred_char_cls
 
         # pred_word_fg, pred_word_tblr, \
         # pred_word_orient, pred_char_fg, \
@@ -183,6 +185,27 @@ class CharNet(nn.Module):
         # )
 
         # return char_bboxes, char_scores, word_instances
+    
+    def get_predictions(self, pred_word_fg, pred_word_tblr, pred_word_orient, pred_char_fg, pred_char_tblr, pred_char_orient, pred_char_cls,im_scale_w, im_scale_h, original_im_w, original_im_h):
+        pred_word_fg, pred_word_tblr, \
+        pred_word_orient, pred_char_fg, \
+        pred_char_tblr, pred_char_cls, \
+        pred_char_orient = to_numpy_or_none(
+            pred_word_fg, pred_word_tblr,
+            pred_word_orient, pred_char_fg,
+            pred_char_tblr, pred_char_cls,
+            pred_char_orient
+        )
+
+        char_bboxes, char_scores, word_instances = self.post_processing(
+            pred_word_fg[0, 1], pred_word_tblr[0],
+            pred_word_orient[0, 0], pred_char_fg[0, 1],
+            pred_char_tblr[0], pred_char_cls[0],
+            im_scale_w, im_scale_h,
+            original_im_w, original_im_h
+        )
+
+        return char_bboxes, char_scores, word_instances
 
     def build_transform(self):
         # to_rgb_transform = T.Lambda(lambda x: x[[2, 1, 0]])

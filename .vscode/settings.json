@@ -2,5 +2,9 @@
     "python.pythonPath": "/home/end_z820_1/miniconda3/envs/p37/bin/python",
     "python.linting.pylintEnabled": false,
     "python.linting.flake8Enabled": true,
-    "python.linting.enabled": true
+    "python.linting.enabled": true,
+    "python.linting.flake8Args": [
+        "--max-line-length=120",
+        "--ignore=E127,E128,E501,E303,E302,E305,E231,W291,W293",
+    ]
 }

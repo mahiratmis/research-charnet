@@ -1,11 +1,16 @@
 import torch
 import numpy as np
 x = np.array([[[1,2],[3,4],[5,6],[7,8]],
-              [[10,20],[30,40],[50,60],[70,80]]])
+              [[10,20],[30,40],[50,60],[70,80]],
+              [[15,25],[35,45],[55,65],[75,80]]])
 print(x.shape)
-
 print(x[0,0], type(x[0,0,]), tuple(x[0,0,]), type(tuple(x[0,0])))
 
+a = torch.from_numpy(x).unsqueeze(dim=0)
+print(a)
+print(a.min(dim=1))
+print(a.min(dim=2))
+print(a.min(dim=3))
 y = x.reshape(-1,8)
 print(y, y.shape)
 
@@ -67,10 +72,10 @@ r2 = torch.ones((1,1,1))
 r3 = torch.cat((r1,r2), dim=2)
 print(r3)
 
-colors= [(1,2,3),(4,5,6),(7,8,9)]
-import matplotlib.pyplot as plt
-import seaborn as sns; sns.set()
-data= torch.randn((128,128))
-fig, ax = plt.subplots(figsize=(50,50))  
-ax = sns.heatmap(data.numpy(), annot=True, ax=ax) 
-fig.savefig('class_conf.png', dpi=400)
+# colors = [(1,2,3),(4,5,6),(7,8,9)]
+# import matplotlib.pyplot as plt
+# import seaborn as sns; sns.set()
+# data = torch.randn((128,128))
+# fig, ax = plt.subplots(figsize=(50,50))  
+# ax = sns.heatmap(data.numpy(), annot=True, ax=ax) 
+# fig.savefig('class_conf.png', dpi=200)

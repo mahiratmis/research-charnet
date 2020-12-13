@@ -200,6 +200,7 @@ def main():
     logger.info('train dataset has {} samples,{} in dataloader'.format(train_data.__len__(), all_step))
     epoch = 0
     best_model = {'recall': 0, 'precision': 0, 'f1': 0, 'models': ''}
+    train_loss = 0
     try:
         for epoch in range(start_epoch, config.epochs):
             start = time.time()
@@ -219,7 +220,7 @@ def main():
                                                                                               recall,
                                                                                               precision,
                                                                                               f1)
-                save_checkpoint(net_save_path, model, optimizer, epoch, logger)
+                save_checkpoint(net_save_path, model, optimizer, epoch, train_loss, logger)
                 if f1 > best_model['f1']:
                     best_path = glob.glob(config.output_dir + '/Best_*.pth')
                     for b_path in best_path:
@@ -238,9 +239,9 @@ def main():
                     if os.path.exists(net_save_path):
                         shutil.copyfile(net_save_path, best_save_path)
                     else:
-                        save_checkpoint(best_save_path, model, optimizer, epoch, logger)
+                        save_checkpoint(best_save_path, model, optimizer, epoch, train_loss, logger)
 
-                    pse_path = glob.glob(config.output_dir + '/PSENet_*.pth')
+                    pse_path = glob.glob(config.output_dir + '/CharNet_*.pth')
                     for p_path in pse_path:
                         if os.path.exists(p_path):
                             os.remove(p_path)
@@ -250,7 +251,7 @@ def main():
                 writer.add_scalar(tag='Test/f1', scalar_value=f1, global_step=epoch)
         writer.close()
     except KeyboardInterrupt:
-        save_checkpoint('{}/final.pth'.format(config.output_dir), model, optimizer, epoch, logger)
+        save_checkpoint('{}/final.pth'.format(config.output_dir), model, optimizer, epoch, train_loss, logger)
     finally:
         if best_model['models']:
             logger.info(best_model)
